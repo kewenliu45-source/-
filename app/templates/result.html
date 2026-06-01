@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>库存分析结果</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<div class="layout">
+    <aside class="sidebar">
+        <div class="logo">智能库存预警</div>
+
+        <div class="menu-section">数据管理</div>
+        <a class="menu" href="/">上传库存数据</a>
+
+        <div class="menu-section">智能分析</div>
+        <a class="menu active" href="/">预警结果</a>
+        <a class="menu" href="/">调货建议</a>
+
+        <div class="menu-section">通知中心</div>
+        <a class="menu" href="/">企业微信提醒</a>
+        <a class="menu" href="/">每日汇总</a>
+
+        <div class="menu-section">系统管理</div>
+        <a class="menu" href="/">系统设置</a>
+    </aside>
+
+    <main class="main">
+        <header class="topbar">
+            <div>
+                <h1>库存分析结果</h1>
+                <p>系统已完成库存风险分析，可查看预警明细并下载Excel结果</p>
+            </div>
+
+            <div class="action-group">
+                <form action="/send-daily-summary" method="post" target="_blank">
+                    <button class="summary-btn" type="submit">发送每日汇总</button>
+                </form>
+                <a class="download-btn" href="/download/{{ output_filename }}">下载Excel</a>
+            </div>
+        </header>
+
+        <section class="stat-grid">
+            <div class="stat-card">
+                <span>数据总数</span>
+                <strong>{{ summary.total }}</strong>
+            </div>
+            <div class="stat-card danger">
+                <span>红色预警</span>
+                <strong>{{ summary.red_count }}</strong>
+            </div>
+            <div class="stat-card warning">
+                <span>黄色预警</span>
+                <strong>{{ summary.yellow_count }}</strong>
+            </div>
+            <div class="stat-card success">
+                <span>正常库存</span>
+                <strong>{{ summary.normal_count }}</strong>
+            </div>
+            <div class="stat-card primary">
+                <span>建议调货总量</span>
+                <strong>{{ summary.suggest_total }}</strong>
+            </div>
+        </section>
+
+        <section class="filter-bar">
+            <input type="text" placeholder="搜索SKU / 商品名 / 仓库">
+            <select>
+                <option>全部预警状态</option>
+                <option>红色预警</option>
+                <option>黄色预警</option>
+                <option>正常</option>
+            </select>
+            <button>筛选</button>
+        </section>
+
+        <section class="table-panel">
+            <div class="panel-title">
+                <h2>预警明细</h2>
+                <p>红色代表已缺货，黄色代表库存不足需要提前调货</p>
+            </div>
+
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                    <tr>
+                        {% if preview_data %}
+                            {% for key in preview_data[0].keys() %}
+                                <th>{{ key }}</th>
+                            {% endfor %}
+                        {% endif %}
+                    </tr>
+                    </thead>
+
+                    <tbody>
+                    {% for row in preview_data %}
+                        <tr class="
+                            {% if row['预警状态'] == '红色预警' %}row-red{% endif %}
+                            {% if row['预警状态'] == '黄色预警' %}row-yellow{% endif %}
+                            {% if row['预警状态'] == '正常' %}row-green{% endif %}
+                        ">
+                            {% for value in row.values() %}
+                                <td>{{ value }}</td>
+                            {% endfor %}
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,1148 @@
+﻿项目代码和文件结构
+生成时间: 2026-05-29 16:18:25
+项目根目录: D:\photo\inventory-warning-system
+
+====================
+文件结构
+====================
+[D] app
+  [F] _init_.py (0 bytes)
+  [F] config.py (382 bytes)
+  [D] data_sources
+    [F] __init__.py (0 bytes)
+    [F] excel_source.py (5544 bytes)
+  [F] main.py (335 bytes)
+  [D] notifications
+    [F] __init__.py (0 bytes)
+    [F] wechat.py (2261 bytes)
+  [D] routers
+    [F] _init_.py (0 bytes)
+    [F] page_router.py (339 bytes)
+    [F] upload_router.py (2438 bytes)
+  [D] services
+    [F] _init_.py (0 bytes)
+    [F] excel_service.py (355 bytes)
+    [F] upload_router.py (0 bytes)
+    [F] warning_service.py (2464 bytes)
+  [D] static
+    [F] style.css (4199 bytes)
+  [D] templates
+    [F] error.html (771 bytes)
+    [F] index.html (990 bytes)
+    [F] result.html (4212 bytes)
+[D] outputs
+  [F] 库存预警结果_客户需求测试数据_50条.xlsx (10048 bytes)
+  [F] 库存预警结果_库存预警测试数据.xlsx (5397 bytes)
+  [F] 库存预警结果_需求.xlsx (6338 bytes)
+  [F] 库存预警结果_智能库存预警结果.xlsx (39755 bytes)
+[F] README.md (83 bytes)
+[F] requirements.txt (70 bytes)
+[D] uploads
+  [F] 副本近期销售表.xlsx (698425 bytes)
+  [F] 副本库存表包含部分在途.xlsx (150660 bytes)
+  [F] 副本苏美达专用-当前可用量二维-0528.xlsx (10788063 bytes)
+  [F] 客户需求测试数据_50条.xlsx (10693 bytes)
+  [F] 库存预警测试数据.xlsx (5674 bytes)
+  [F] 需求.xlsx (12369 bytes)
+
+====================
+文本源码内容
+====================
+
+----- app\_init_.py -----
+
+
+----- app\config.py -----
+import os
+
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
+OUTPUT_DIR = os.path.join(BASE_DIR, "outputs")
+
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+SAFE_DAYS = 7
+
+# 企业微信机器人 Webhook
+# 没有就先留空，不影响系统运行
+WECHAT_WEBHOOK = ""
+
+----- app\data_sources\__init__.py -----
+
+
+----- app\data_sources\excel_source.py -----
+import pandas as pd
+import numpy as np
+
+# ========= 通用清洗 =========
+
+def clean_columns(df):
+    df.columns = (
+        df.columns
+        .astype(str)
+        .str.strip()
+        .str.replace("\n", "", regex=False)
+        .str.replace(" ", "", regex=False)
+    )
+    return df
+
+
+def clean_code(value):
+    if pd.isna(value):
+        return ""
+
+    return str(value).replace(".0", "").strip()
+
+
+def clean_size(value):
+    if pd.isna(value):
+        return ""
+
+    value = str(value).strip()
+
+    value = value.replace("码", "")
+
+    return value
+
+
+# ========= 销售表 =========
+
+def build_sales_standard_df(sales_file):
+
+    sales_df = pd.read_excel(sales_file, header=7)
+
+    sales_df = clean_columns(sales_df)
+
+    sales_df["存货编码"] = sales_df["存货编码"].apply(clean_code)
+
+    sales_df["尺码"] = sales_df["尺码"].apply(clean_size)
+
+    sales_df["数量"] = pd.to_numeric(
+        sales_df["数量"],
+        errors="coerce"
+    ).fillna(0)
+
+    # 只保留有销量
+    sales_df = sales_df[sales_df["数量"] > 0]
+
+    sales_standard_df = (
+        sales_df
+        .groupby(
+            ["存货编码", "存货", "尺码"],
+            as_index=False
+        )["数量"]
+        .sum()
+    )
+
+    sales_standard_df = sales_standard_df.rename(
+        columns={
+            "数量": "近7天销量"
+        }
+    )
+
+    sales_standard_df["日均销量"] = (
+        sales_standard_df["近7天销量"] / 7
+    )
+
+    return sales_standard_df
+
+
+# ========= 库存表 =========
+
+def build_inventory_standard_df(inventory_file):
+
+    inventory_df = pd.read_excel(inventory_file, header=6)
+
+    inventory_df = clean_columns(inventory_df)
+
+    inventory_df["存货编码"] = inventory_df["存货编码"].apply(clean_code)
+
+    inventory_df["尺码"] = inventory_df["尺码"].apply(clean_size)
+
+    inventory_df["可用量(主)"] = pd.to_numeric(
+        inventory_df["可用量(主)"],
+        errors="coerce"
+    ).fillna(0)
+
+    inventory_df["现存量(主)"] = pd.to_numeric(
+        inventory_df["现存量(主)"],
+        errors="coerce"
+    ).fillna(0)
+
+    inventory_standard_df = inventory_df[
+        [
+            "仓库编码",
+            "仓库",
+            "存货编码",
+            "存货",
+            "尺码",
+            "现存量(主)",
+            "可用量(主)"
+        ]
+    ].copy()
+
+    inventory_standard_df = inventory_standard_df.rename(
+        columns={
+            "现存量(主)": "当前现存量",
+            "可用量(主)": "当前可用量"
+        }
+    )
+
+    return inventory_standard_df
+
+
+# ========= 总部二维库存表 =========
+
+def build_hq_standard_df(hq_file):
+
+    hq_df = pd.read_excel(hq_file, header=1)
+
+    hq_df = clean_columns(hq_df)
+
+    hq_df["存货编码"] = hq_df["存货编码"].apply(clean_code)
+
+    id_cols = [
+        "检索号",
+        "存货编码",
+        "存货名称",
+        "存货等级",
+        "款式类别"
+    ]
+
+    id_cols = [c for c in id_cols if c in hq_df.columns]
+
+    size_cols = [
+        c for c in hq_df.columns
+        if c not in id_cols
+    ]
+
+    hq_long_df = hq_df.melt(
+        id_vars=id_cols,
+        value_vars=size_cols,
+        var_name="尺码",
+        value_name="总部库存"
+    )
+
+    hq_long_df["尺码"] = hq_long_df["尺码"].apply(clean_size)
+
+    hq_long_df["总部库存"] = pd.to_numeric(
+        hq_long_df["总部库存"],
+        errors="coerce"
+    ).fillna(0)
+
+    hq_long_df = hq_long_df[
+        hq_long_df["总部库存"] > 0
+    ]
+
+    hq_standard_df = (
+        hq_long_df
+        .groupby(
+            ["存货编码", "尺码"],
+            as_index=False
+        )["总部库存"]
+        .sum()
+    )
+
+    return hq_standard_df
+
+
+# ========= 构建标准数据层 =========
+
+def build_standard_data(
+    inventory_file,
+    sales_file,
+    hq_file
+):
+
+    sales_df = build_sales_standard_df(sales_file)
+
+    inventory_df = build_inventory_standard_df(inventory_file)
+
+    hq_df = build_hq_standard_df(hq_file)
+
+    # 聚合库存
+    inventory_group_df = (
+        inventory_df
+        .groupby(
+            ["存货编码", "尺码"],
+            as_index=False
+        )
+        .agg({
+            "当前现存量": "sum",
+            "当前可用量": "sum",
+            "仓库编码": "first",
+            "仓库": "first",
+            "存货": "first"
+        })
+    )
+
+    # 销售 + 库存
+    standard_df = sales_df.merge(
+        inventory_group_df,
+        on=["存货编码", "尺码"],
+        how="left",
+        suffixes=("", "_库存")
+    )
+
+    # 商品名补全
+    if "存货_库存" in standard_df.columns:
+
+        standard_df["存货"] = standard_df["存货"].fillna(
+            standard_df["存货_库存"]
+        )
+
+        standard_df = standard_df.drop(
+            columns=["存货_库存"]
+        )
+
+    # 合并总部库存
+    standard_df = standard_df.merge(
+        hq_df,
+        on=["存货编码", "尺码"],
+        how="left"
+    )
+
+    # 空值处理
+    standard_df["当前现存量"] = (
+        standard_df["当前现存量"]
+        .fillna(0)
+    )
+
+    standard_df["当前可用量"] = (
+        standard_df["当前可用量"]
+        .fillna(0)
+    )
+
+    standard_df["总部库存"] = (
+        standard_df["总部库存"]
+        .fillna(0)
+    )
+
+    return standard_df
+
+----- app\main.py -----
+from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+from app.routers import page_router, upload_router
+
+app = FastAPI(title="智能库存预警系统")
+
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
+
+app.include_router(page_router.router)
+app.include_router(upload_router.router)
+
+----- app\notifications\__init__.py -----
+
+
+----- app\notifications\wechat.py -----
+import requests
+from app.config import WECHAT_WEBHOOK
+
+
+def send_wechat_message(content: str):
+    if not WECHAT_WEBHOOK:
+        print("未配置企业微信 Webhook，跳过发送")
+        return False
+
+    data = {
+        "msgtype": "text",
+        "text": {
+            "content": content
+        }
+    }
+
+    try:
+        response = requests.post(WECHAT_WEBHOOK, json=data, timeout=10)
+        result = response.json()
+        print("企业微信发送结果：", result)
+        return result.get("errcode") == 0
+    except Exception as e:
+        print("企业微信发送失败：", e)
+        return False
+
+
+def build_warning_message(red_list, yellow_list):
+    lines = []
+    lines.append("【智能库存预警提醒】")
+    lines.append(f"红色预警：{len(red_list)} 条")
+    lines.append(f"黄色预警：{len(yellow_list)} 条")
+    lines.append("")
+
+    if red_list:
+        lines.append("🔴 红色预警：已缺货")
+        for item in red_list[:10]:
+            lines.append(
+                f"- {item.get('存货', item.get('商品名称', '未知商品'))} "
+                f"｜SKU：{item.get('存货编码', '')} "
+                f"｜可用量：{item.get('系统计算可用量', '')} "
+                f"｜建议调货：{item.get('建议调货量', '')}"
+            )
+        lines.append("")
+
+    if yellow_list:
+        lines.append("🟡 黄色预警：库存不足，建议调货")
+        for item in yellow_list[:10]:
+            lines.append(
+                f"- {item.get('存货', item.get('商品名称', '未知商品'))} "
+                f"｜SKU：{item.get('存货编码', '')} "
+                f"｜可售天数：{item.get('可售天数', '')} "
+                f"｜建议调货：{item.get('建议调货量', '')}"
+            )
+
+    return "\n".join(lines)
+
+
+def build_daily_summary_message(summary):
+    return f"""【库存预警每日汇总】
+
+预警总数：{summary.get("warning_total", 0)}
+红色预警：{summary.get("red_count", 0)}
+黄色预警：{summary.get("yellow_count", 0)}
+正常库存：{summary.get("normal_count", 0)}
+建议调货总量：{summary.get("suggest_total", 0)}
+
+请及时查看库存预警后台。"""
+
+----- app\routers\_init_.py -----
+
+
+----- app\routers\page_router.py -----
+from fastapi import APIRouter, Request
+from fastapi.templating import Jinja2Templates
+
+router = APIRouter()
+templates = Jinja2Templates(directory="app/templates")
+
+
+@router.get("/")
+def index(request: Request):
+    return templates.TemplateResponse(
+        request=request,
+        name="index.html",
+        context={}
+    )
+
+----- app\routers\upload_router.py -----
+from fastapi import APIRouter, UploadFile, File, Request
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
+import traceback
+
+from app.data_sources.excel_source import build_standard_data
+from app.services.warning_service import analyze_standard_data
+
+router = APIRouter()
+templates = Jinja2Templates(directory="app/templates")
+
+
+@router.post("/upload", response_class=HTMLResponse)
+async def upload_files(
+    request: Request,
+    inventory_file: UploadFile = File(...),
+    sales_file: UploadFile = File(...),
+    hq_file: UploadFile = File(...)
+):
+    try:
+        standard_df = build_standard_data(
+            inventory_file.file,
+            sales_file.file,
+            hq_file.file
+        )
+
+        result = analyze_standard_data(standard_df)
+
+        if isinstance(result, tuple):
+            result_df = result[0]
+        else:
+            result_df = result
+
+        records = result_df.to_dict(orient="records")
+
+        red_count = int((result_df["预警状态"] == "红色预警").sum())
+        yellow_count = int((result_df["预警状态"] == "黄色预警").sum())
+        normal_count = int((result_df["预警状态"] == "正常").sum())
+
+        suggest_total = int(result_df["建议调货量"].sum())
+        hq_total = int(result_df["总部可调数量"].sum())
+
+        summary = {
+            "total": len(result_df),
+            "red_count": red_count,
+            "yellow_count": yellow_count,
+            "normal_count": normal_count,
+            "suggest_total": suggest_total,
+            "hq_total": hq_total
+        }
+
+        return templates.TemplateResponse(
+            request=request,
+            name="result.html",
+            context={
+                "records": records,
+                "preview_data": records,
+                "summary": summary,
+                "red_count": red_count,
+                "yellow_count": yellow_count,
+                "normal_count": normal_count,
+                "suggest_total": suggest_total,
+                "hq_total": hq_total,
+                "output_filename": ""
+            }
+        )
+
+    except Exception:
+        error_msg = traceback.format_exc()
+        print(error_msg)
+
+        return templates.TemplateResponse(
+            request=request,
+            name="error.html",
+            context={
+                "error": error_msg
+            }
+        )
+
+----- app\services\_init_.py -----
+
+
+----- app\services\excel_service.py -----
+import os
+import pandas as pd
+from app.config import UPLOAD_DIR
+
+
+async def save_upload_file(file):
+    file_path = os.path.join(UPLOAD_DIR, file.filename)
+
+    content = await file.read()
+
+    with open(file_path, "wb") as f:
+        f.write(content)
+
+    return file_path
+
+
+def read_excel(file_path):
+    return pd.read_excel(file_path)
+
+----- app\services\upload_router.py -----
+
+
+----- app\services\warning_service.py -----
+import pandas as pd
+import numpy as np
+
+
+def analyze_standard_data(df: pd.DataFrame) -> pd.DataFrame:
+    result_df = df.copy()
+
+    # 日均销量
+    result_df["日均销量"] = result_df["日均销量"].fillna(0)
+
+    # 当前可用量
+    result_df["当前可用量"] = result_df["当前可用量"].fillna(0)
+
+    # 总部库存
+    result_df["总部库存"] = result_df["总部库存"].fillna(0)
+
+    # 可售天数
+    result_df["可售天数"] = np.where(
+        result_df["日均销量"] > 0,
+        result_df["当前可用量"] / result_df["日均销量"],
+        999
+    )
+
+    # 目标库存（7天安全库存）
+    result_df["目标库存"] = result_df["日均销量"] * 7
+
+    # 建议调货量
+    result_df["建议调货量"] = (
+        result_df["目标库存"] - result_df["当前可用量"]
+    )
+
+    result_df["建议调货量"] = (
+        result_df["建议调货量"]
+        .clip(lower=0)
+        .round(0)
+    )
+
+    # 总部可调数量
+    result_df["总部可调数量"] = np.minimum(
+        result_df["总部库存"],
+        result_df["建议调货量"]
+    )
+
+    # 预警状态
+    def get_warning_status(row):
+        if row["当前可用量"] <= 0:
+            return "红色预警"
+
+        elif row["可售天数"] < 7:
+            return "黄色预警"
+
+        else:
+            return "正常"
+
+    result_df["预警状态"] = result_df.apply(
+        get_warning_status,
+        axis=1
+    )
+
+    # 调货建议
+    def get_transfer_advice(row):
+        if row["预警状态"] == "红色预警":
+            return f"建议立即调货 {int(row['总部可调数量'])} 件"
+
+        elif row["预警状态"] == "黄色预警":
+            return f"建议尽快调货 {int(row['总部可调数量'])} 件"
+
+        return "-"
+
+    result_df["调货建议"] = result_df.apply(
+        get_transfer_advice,
+        axis=1
+    )
+
+    # 排序
+    warning_order = {
+        "红色预警": 0,
+        "黄色预警": 1,
+        "正常": 2
+    }
+
+    result_df["排序"] = result_df["预警状态"].map(warning_order)
+
+    result_df = result_df.sort_values(
+        by=["排序", "可售天数"]
+    )
+
+    result_df = result_df.drop(columns=["排序"])
+
+    # 数值美化
+    result_df["可售天数"] = result_df["可售天数"].round(1)
+    result_df["日均销量"] = result_df["日均销量"].round(1)
+
+    return result_df
+
+----- app\static\style.css -----
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    font-family: "Microsoft YaHei", Arial, sans-serif;
+    background: #f4f7fb;
+    color: #1f2937;
+}
+
+a {
+    text-decoration: none;
+}
+
+.layout {
+    display: flex;
+    min-height: 100vh;
+}
+
+.sidebar {
+    width: 240px;
+    background: #0f172a;
+    color: white;
+    padding: 24px 18px;
+}
+
+.logo {
+    font-size: 21px;
+    font-weight: 700;
+    margin-bottom: 34px;
+}
+
+.menu-section {
+    margin: 24px 0 10px;
+    color: #94a3b8;
+    font-size: 13px;
+}
+
+.menu {
+    display: block;
+    padding: 12px 14px;
+    border-radius: 10px;
+    color: #cbd5e1;
+    margin-bottom: 6px;
+}
+
+.menu.active,
+.menu:hover {
+    background: #2563eb;
+    color: white;
+}
+
+.main {
+    flex: 1;
+    padding: 28px;
+    overflow-x: hidden;
+}
+
+.topbar {
+    background: white;
+    border-radius: 18px;
+    padding: 22px 26px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    box-shadow: 0 10px 28px rgba(15, 23, 42, 0.06);
+    margin-bottom: 24px;
+}
+
+.topbar h1 {
+    margin: 0;
+    font-size: 26px;
+}
+
+.topbar p {
+    margin: 8px 0 0;
+    color: #64748b;
+}
+
+.user-badge {
+    background: #eff6ff;
+    color: #2563eb;
+    padding: 10px 18px;
+    border-radius: 999px;
+}
+
+.overview-grid,
+.stat-grid {
+    display: grid;
+    gap: 18px;
+    margin-bottom: 24px;
+}
+
+.overview-grid {
+    grid-template-columns: repeat(3, 1fr);
+}
+
+.stat-grid {
+    grid-template-columns: repeat(5, 1fr);
+}
+
+.overview-card,
+.stat-card,
+.upload-panel,
+.table-panel {
+    background: white;
+    border-radius: 18px;
+    box-shadow: 0 10px 28px rgba(15, 23, 42, 0.06);
+}
+
+.overview-card,
+.stat-card {
+    padding: 22px;
+}
+
+.overview-card span,
+.stat-card span {
+    color: #64748b;
+    font-size: 14px;
+}
+
+.overview-card strong,
+.stat-card strong {
+    display: block;
+    font-size: 26px;
+    margin: 10px 0 6px;
+}
+
+.overview-card p {
+    color: #94a3b8;
+    margin: 0;
+}
+
+.stat-card.danger strong {
+    color: #dc2626;
+}
+
+.stat-card.warning strong {
+    color: #d97706;
+}
+
+.stat-card.success strong {
+    color: #16a34a;
+}
+
+.stat-card.primary strong {
+    color: #2563eb;
+}
+
+.upload-panel,
+.table-panel {
+    padding: 28px;
+}
+
+.panel-title h2 {
+    margin: 0;
+    font-size: 22px;
+}
+
+.panel-title p {
+    color: #64748b;
+    margin-top: 8px;
+}
+
+.upload-box {
+    display: block;
+    margin: 24px 0;
+    padding: 46px;
+    border: 2px dashed #93c5fd;
+    border-radius: 18px;
+    background: #eff6ff;
+    text-align: center;
+    cursor: pointer;
+}
+
+.upload-box input {
+    display: none;
+}
+
+.upload-icon {
+    width: 60px;
+    height: 60px;
+    margin: 0 auto 12px;
+    border-radius: 50%;
+    background: #2563eb;
+    color: white;
+    font-size: 38px;
+    line-height: 56px;
+}
+
+.primary-btn,
+.download-btn,
+.summary-btn,
+.filter-bar button {
+    border: none;
+    border-radius: 12px;
+    padding: 12px 20px;
+    cursor: pointer;
+    color: white;
+    font-size: 15px;
+}
+
+.primary-btn {
+    background: #2563eb;
+}
+
+.download-btn {
+    background: #16a34a;
+}
+
+.summary-btn {
+    background: #f59e0b;
+}
+
+.action-group {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+}
+
+.filter-bar {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 18px;
+}
+
+.filter-bar input,
+.filter-bar select {
+    border: 1px solid #cbd5e1;
+    border-radius: 12px;
+    padding: 12px 14px;
+    background: white;
+}
+
+.filter-bar input {
+    width: 300px;
+}
+
+.filter-bar button {
+    background: #2563eb;
+}
+
+.table-wrap {
+    overflow-x: auto;
+    margin-top: 18px;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    white-space: nowrap;
+}
+
+th {
+    background: #f8fafc;
+    color: #475569;
+    padding: 12px;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+td {
+    text-align: center;
+    padding: 11px;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.row-red {
+    background: #fee2e2;
+}
+
+.row-yellow {
+    background: #fef3c7;
+}
+
+.row-green {
+    background: #dcfce7;
+}
+
+----- app\templates\error.html -----
+<!DOCTYPE html>
+<html lang="zh">
+
+<head>
+    <meta charset="UTF-8">
+    <title>系统错误</title>
+
+    <style>
+        body {
+            font-family: Arial;
+            background: #f5f5f5;
+            padding: 40px;
+        }
+
+        .box {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+        }
+
+        h2 {
+            color: red;
+        }
+
+        pre {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            background: #eee;
+            padding: 20px;
+            border-radius: 8px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="box">
+        <h2>系统运行出错</h2>
+
+        <pre>{{ error }}</pre>
+    </div>
+
+</body>
+
+</html>
+
+----- app\templates\index.html -----
+<form action="/upload" method="post" enctype="multipart/form-data">
+
+    <label class="upload-box">
+        <input type="file" name="inventory_file" accept=".xlsx,.xls" required>
+        <div class="upload-icon">1</div>
+        <h3>上传本地库存表</h3>
+        <p>例如：副本库存表包含部分在途.xlsx</p>
+    </label>
+
+    <label class="upload-box">
+        <input type="file" name="sales_file" accept=".xlsx,.xls" required>
+        <div class="upload-icon">2</div>
+        <h3>上传近期销售表</h3>
+        <p>系统只会分析近期销售表中出现过的商品</p>
+    </label>
+
+    <label class="upload-box">
+        <input type="file" name="hq_file" accept=".xlsx,.xls" required>
+        <div class="upload-icon">3</div>
+        <h3>上传总部库存二维表</h3>
+        <p>系统会自动把横向尺码转换为可匹配数据</p>
+    </label>
+
+    <button class="primary-btn" type="submit">开始三表合并分析</button>
+</form>
+
+----- app\templates\result.html -----
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>库存分析结果</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<div class="layout">
+    <aside class="sidebar">
+        <div class="logo">智能库存预警</div>
+
+        <div class="menu-section">数据管理</div>
+        <a class="menu" href="/">上传库存数据</a>
+
+        <div class="menu-section">智能分析</div>
+        <a class="menu active" href="/">预警结果</a>
+        <a class="menu" href="/">调货建议</a>
+
+        <div class="menu-section">通知中心</div>
+        <a class="menu" href="/">企业微信提醒</a>
+        <a class="menu" href="/">每日汇总</a>
+
+        <div class="menu-section">系统管理</div>
+        <a class="menu" href="/">系统设置</a>
+    </aside>
+
+    <main class="main">
+        <header class="topbar">
+            <div>
+                <h1>库存分析结果</h1>
+                <p>系统已完成库存风险分析，可查看预警明细并下载Excel结果</p>
+            </div>
+
+            <div class="action-group">
+                <form action="/send-daily-summary" method="post" target="_blank">
+                    <button class="summary-btn" type="submit">发送每日汇总</button>
+                </form>
+                <a class="download-btn" href="/download/{{ output_filename }}">下载Excel</a>
+            </div>
+        </header>
+
+        <section class="stat-grid">
+            <div class="stat-card">
+                <span>数据总数</span>
+                <strong>{{ summary.total }}</strong>
+            </div>
+            <div class="stat-card danger">
+                <span>红色预警</span>
+                <strong>{{ summary.red_count }}</strong>
+            </div>
+            <div class="stat-card warning">
+                <span>黄色预警</span>
+                <strong>{{ summary.yellow_count }}</strong>
+            </div>
+            <div class="stat-card success">
+                <span>正常库存</span>
+                <strong>{{ summary.normal_count }}</strong>
+            </div>
+            <div class="stat-card primary">
+                <span>建议调货总量</span>
+                <strong>{{ summary.suggest_total }}</strong>
+            </div>
+        </section>
+
+        <section class="filter-bar">
+            <input type="text" placeholder="搜索SKU / 商品名 / 仓库">
+            <select>
+                <option>全部预警状态</option>
+                <option>红色预警</option>
+                <option>黄色预警</option>
+                <option>正常</option>
+            </select>
+            <button>筛选</button>
+        </section>
+
+        <section class="table-panel">
+            <div class="panel-title">
+                <h2>预警明细</h2>
+                <p>红色代表已缺货，黄色代表库存不足需要提前调货</p>
+            </div>
+
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                    <tr>
+                        {% if preview_data %}
+                            {% for key in preview_data[0].keys() %}
+                                <th>{{ key }}</th>
+                            {% endfor %}
+                        {% endif %}
+                    </tr>
+                    </thead>
+
+                    <tbody>
+                    {% for row in preview_data %}
+                        <tr class="
+                            {% if row['预警状态'] == '红色预警' %}row-red{% endif %}
+                            {% if row['预警状态'] == '黄色预警' %}row-yellow{% endif %}
+                            {% if row['预警状态'] == '正常' %}row-green{% endif %}
+                        ">
+                            {% for value in row.values() %}
+                                <td>{{ value }}</td>
+                            {% endfor %}
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+</div>
+
+</body>
+</html>
+
+----- outputs\库存预警结果_客户需求测试数据_50条.xlsx -----
+[二进制或非文本文件，未展开内容。大小: 10048 bytes]
+
+----- outputs\库存预警结果_库存预警测试数据.xlsx -----
+[二进制或非文本文件，未展开内容。大小: 5397 bytes]
+
+----- outputs\库存预警结果_需求.xlsx -----
+[二进制或非文本文件，未展开内容。大小: 6338 bytes]
+
+----- outputs\库存预警结果_智能库存预警结果.xlsx -----
+[二进制或非文本文件，未展开内容。大小: 39755 bytes]
+
+----- README.md -----
+# 库存预警系统
+
+## 安装依赖
+
+```bash
+pip install -r requirements.txt
+
+----- requirements.txt -----
+fastapi
+uvicorn
+pandas
+openpyxl
+python-multipart
+jinja2
+requests
+
+----- uploads\副本近期销售表.xlsx -----
+[二进制或非文本文件，未展开内容。大小: 698425 bytes]
+
+----- uploads\副本库存表包含部分在途.xlsx -----
+[二进制或非文本文件，未展开内容。大小: 150660 bytes]
+
+----- uploads\副本苏美达专用-当前可用量二维-0528.xlsx -----
+[二进制或非文本文件，未展开内容。大小: 10788063 bytes]
+
+----- uploads\客户需求测试数据_50条.xlsx -----
+[二进制或非文本文件，未展开内容。大小: 10693 bytes]
+
+----- uploads\库存预警测试数据.xlsx -----
+[二进制或非文本文件，未展开内容。大小: 5674 bytes]
+
+----- uploads\需求.xlsx -----
+[二进制或非文本文件，未展开内容。大小: 12369 bytes]

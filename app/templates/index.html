@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>上传库存数据 - 智能库存预警系统</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="layout">
+    <aside class="sidebar">
+        <div class="logo">
+            <span class="logo-mark">库</span>
+            <span>智能库存预警</span>
+        </div>
+
+        <div class="menu-section">数据管理</div>
+        <a class="menu active" href="/">
+            <span class="menu-icon">↑</span>
+            上传库存数据
+        </a>
+
+        <div class="menu-section">智能分析</div>
+        <a class="menu" href="/">
+            <span class="menu-icon">!</span>
+            预警结果
+        </a>
+        <a class="menu" href="/">
+            <span class="menu-icon">↔</span>
+            调货建议
+        </a>
+
+        <div class="menu-section">通知中心</div>
+        <a class="menu" href="/">
+            <span class="menu-icon">✉</span>
+            企业微信提醒
+        </a>
+        <a class="menu" href="/">
+            <span class="menu-icon">☰</span>
+            每日汇总
+        </a>
+    </aside>
+
+    <main class="main upload-main">
+        <header class="topbar upload-hero">
+            <div>
+                <span class="eyebrow">三表合并分析</span>
+                <h1>上传库存数据</h1>
+                <p>导入本地库存、近期销售、总部可用量三张 Excel 表，系统将自动匹配 SKU、识别缺货风险并生成调货建议。</p>
+            </div>
+            <div class="hero-status">
+                <span>处理流程</span>
+                <strong>上传 → 合并 → 预警</strong>
+            </div>
+        </header>
+
+        <section class="upload-shell">
+            <div class="upload-panel upload-card">
+                <div class="panel-title">
+                    <span class="eyebrow">数据源</span>
+                    <h2>请选择需要分析的 3 份表格</h2>
+                    <p>支持 .xlsx / .xls 文件。请按下方顺序上传，字段格式保持原始业务表结构即可。</p>
+                </div>
+
+                <form class="upload-form" action="/upload" method="post" enctype="multipart/form-data">
+                    <label class="upload-box">
+                        <input type="file" name="inventory_file" accept=".xlsx,.xls" required>
+                        <span class="upload-step">01</span>
+                        <span class="upload-icon">📦</span>
+                        <span class="upload-content">
+                            <strong>本地库存表</strong>
+                            <small>例如：库存表包含部分在途.xlsx</small>
+                            <em data-empty="未选择文件">未选择文件</em>
+                        </span>
+                    </label>
+
+                    <label class="upload-box">
+                        <input type="file" name="sales_file" accept=".xlsx,.xls" required>
+                        <span class="upload-step">02</span>
+                        <span class="upload-icon">📈</span>
+                        <span class="upload-content">
+                            <strong>近期销售表</strong>
+                            <small>系统会识别近期销售表中出现过的商品需求</small>
+                            <em data-empty="未选择文件">未选择文件</em>
+                        </span>
+                    </label>
+
+                    <label class="upload-box">
+                        <input type="file" name="hq_file" accept=".xlsx,.xls" required>
+                        <span class="upload-step">03</span>
+                        <span class="upload-icon">🏢</span>
+                        <span class="upload-content">
+                            <strong>总部库存二维表</strong>
+                            <small>系统会自动把横向尺码转换为可匹配数据</small>
+                            <em data-empty="未选择文件">未选择文件</em>
+                        </span>
+                    </label>
+
+                    <div class="upload-actions">
+                        <div class="upload-note">
+                            <strong>分析输出</strong>
+                            <span>缺货预警、可调拨库存、建议调货数量</span>
+                        </div>
+                        <button class="primary-btn" type="submit">开始合并分析</button>
+                    </div>
+                </form>
+            </div>
+
+            <aside class="upload-guide">
+                <div class="guide-card">
+                    <span class="guide-number">1</span>
+                    <strong>字段无需手动整理</strong>
+                    <p>上传原始业务表，系统会在后台执行标准化和尺码转换。</p>
+                </div>
+                <div class="guide-card">
+                    <span class="guide-number">2</span>
+                    <strong>结果页自动汇总</strong>
+                    <p>完成后展示红黄绿预警分布，并支持下载 Excel 结果。</p>
+                </div>
+                <div class="guide-card">
+                    <span class="guide-number">3</span>
+                    <strong>建议先使用测试数据</strong>
+                    <p>如需校验格式，可先上传 uploads 目录内的示例表。</p>
+                </div>
+            </aside>
+        </section>
+    </main>
+</div>
+
+<script>
+    document.querySelectorAll('.upload-box input[type="file"]').forEach((input) => {
+        input.addEventListener('change', () => {
+            const box = input.closest('.upload-box');
+            const fileName = box.querySelector('em');
+            const selected = input.files && input.files.length > 0;
+
+            box.classList.toggle('has-file', selected);
+            fileName.textContent = selected ? input.files[0].name : fileName.dataset.empty;
+        });
+    });
+
+    document.querySelector('.upload-form').addEventListener('submit', (event) => {
+        const button = event.currentTarget.querySelector('.primary-btn');
+        button.disabled = true;
+        button.textContent = '正在分析...';
+    });
+</script>
+</body>
+</html>
