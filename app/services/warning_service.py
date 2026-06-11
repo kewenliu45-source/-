@@ -5,20 +5,18 @@ import numpy as np
 def analyze_standard_data(df: pd.DataFrame) -> pd.DataFrame:
     result_df = df.copy()
 
-    # 日均销量
-    result_df["日均销量"] = result_df["日均销量"].fillna(0)
-
-    # 当前可用量
-    result_df["当前可用量"] = result_df["当前可用量"].fillna(0)
-
-    # 总部库存
-    result_df["总部库存"] = result_df["总部库存"].fillna(0)
+    for column in ["日均销量", "当前可用量", "总部库存"]:
+        result_df[column] = pd.to_numeric(
+            result_df[column],
+            errors="coerce"
+        ).fillna(0)
 
     # 可售天数
-    result_df["可售天数"] = np.where(
-        result_df["日均销量"] > 0,
-        result_df["当前可用量"] / result_df["日均销量"],
-        999
+    result_df["可售天数"] = 999.0
+    has_sales = result_df["日均销量"] > 0
+    result_df.loc[has_sales, "可售天数"] = (
+        result_df.loc[has_sales, "当前可用量"]
+        / result_df.loc[has_sales, "日均销量"]
     )
 
     # 目标库存（7天安全库存）
@@ -59,13 +57,26 @@ def analyze_standard_data(df: pd.DataFrame) -> pd.DataFrame:
 
     # 调货建议
     def get_transfer_advice(row):
+        suggest_qty = int(row["建议调货量"])
+        hq_available_qty = int(row["总部可调数量"])
+
         if row["预警状态"] == "红色预警":
-            return f"建议立即调货 {int(row['总部可调数量'])} 件"
+            action = "建议立即调货"
 
         elif row["预警状态"] == "黄色预警":
-            return f"建议尽快调货 {int(row['总部可调数量'])} 件"
+            action = "建议尽快调货"
 
-        return "-"
+        else:
+            return "-"
+
+        if hq_available_qty <= 0:
+            return f"{action} {suggest_qty} 件；总部暂无可调库存"
+
+        if hq_available_qty < suggest_qty:
+            shortage_qty = suggest_qty - hq_available_qty
+            return f"{action} {suggest_qty} 件；总部可调 {hq_available_qty} 件，仍缺 {shortage_qty} 件"
+
+        return f"{action} {suggest_qty} 件；总部可满足"
 
     result_df["调货建议"] = result_df.apply(
         get_transfer_advice,

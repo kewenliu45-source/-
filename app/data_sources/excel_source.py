@@ -1,6 +1,8 @@
 import pandas as pd
 import numpy as np
 
+from app.data_sources.base import ensure_standard_columns
+
 # ========= 通用清洗 =========
 
 def clean_columns(df):
@@ -245,4 +247,4 @@ def build_standard_data(
         .fillna(0)
     )
 
-    return standard_df
+    return ensure_standard_columns(standard_df)

@@ -5,3 +5,7 @@ openpyxl
 python-multipart
 jinja2
 requests
+sqlalchemy
+python-dotenv
+pyodbc
+pycryptodome

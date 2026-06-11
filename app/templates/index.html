@@ -104,6 +104,17 @@
                         <button class="primary-btn" type="submit">开始合并分析</button>
                     </div>
                 </form>
+
+                <form class="database-form" action="/database-analysis" method="post">
+                    <div class="database-source">
+                        <div>
+                            <span class="eyebrow">客户数据库</span>
+                            <h3>从数据库直接读取库存数据</h3>
+                            <p>未连接客户 VPN 时，系统默认使用模拟数据库数据验证流程；到客户现场后切换数据库配置即可。</p>
+                        </div>
+                        <button class="secondary-btn" type="submit">从数据库分析</button>
+                    </div>
+                </form>
             </div>
 
             <aside class="upload-guide">
@@ -143,6 +154,12 @@
         const button = event.currentTarget.querySelector('.primary-btn');
         button.disabled = true;
         button.textContent = '正在分析...';
+    });
+
+    document.querySelector('.database-form').addEventListener('submit', (event) => {
+        const button = event.currentTarget.querySelector('.secondary-btn');
+        button.disabled = true;
+        button.textContent = '正在读取...';
     });
 </script>
 </body>

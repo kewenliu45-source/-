@@ -268,6 +268,7 @@ a {
 .upload-panel,
 .table-panel {
     padding: 28px;
+    margin-bottom: 24px;
 }
 
 .upload-card {
@@ -399,6 +400,7 @@ a {
 }
 
 .primary-btn,
+.secondary-btn,
 .download-btn,
 .summary-btn,
 .filter-bar button {
@@ -433,8 +435,51 @@ a {
     transform: none;
 }
 
+.secondary-btn {
+    min-width: 152px;
+    background: #0f766e;
+    box-shadow: 0 12px 24px rgba(15, 118, 110, 0.18);
+}
+
+.secondary-btn:hover {
+    transform: translateY(-1px);
+    background: #115e59;
+}
+
+.secondary-btn:disabled {
+    cursor: wait;
+    opacity: 0.72;
+    transform: none;
+}
+
 .download-btn {
     background: var(--green);
+}
+
+.database-form {
+    margin-top: 22px;
+}
+
+.database-source {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 18px;
+    padding: 22px;
+    border: 1px solid rgba(15, 118, 110, 0.18);
+    border-radius: 12px;
+    background: #f6fbfa;
+}
+
+.database-source h3 {
+    margin: 4px 0 0;
+    font-size: 18px;
+}
+
+.database-source p {
+    margin: 8px 0 0;
+    color: var(--muted);
+    line-height: 1.6;
 }
 
 .summary-btn {
@@ -512,6 +557,15 @@ a {
     margin-top: 18px;
 }
 
+.empty-state {
+    padding: 22px;
+    border: 1px dashed var(--line);
+    border-radius: 10px;
+    background: #f8fafc;
+    color: var(--muted);
+    text-align: center;
+}
+
 table {
     width: 100%;
     border-collapse: collapse;
@@ -580,6 +634,7 @@ td {
 
     .topbar,
     .upload-actions,
+    .database-source,
     .filter-bar {
         flex-direction: column;
         align-items: stretch;
@@ -618,6 +673,10 @@ td {
     }
 
     .primary-btn {
+        width: 100%;
+    }
+
+    .secondary-btn {
         width: 100%;
     }
 }

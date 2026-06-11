@@ -15,8 +15,8 @@
         <a class="menu" href="/">上传库存数据</a>
 
         <div class="menu-section">智能分析</div>
-        <a class="menu active" href="/">预警结果</a>
-        <a class="menu" href="/">调货建议</a>
+        <a class="menu active" href="#warning-detail">预警结果</a>
+        <a class="menu" href="#transfer-advice">调货建议</a>
 
         <div class="menu-section">通知中心</div>
         <a class="menu" href="/">企业微信提醒</a>
@@ -30,7 +30,7 @@
         <header class="topbar">
             <div>
                 <h1>库存分析结果</h1>
-                <p>系统已完成库存风险分析，可查看预警明细并下载Excel结果</p>
+                <p>系统已完成库存风险分析，数据来源：{{ summary.data_source_name }}。可查看预警明细并下载Excel结果</p>
             </div>
 
             <div class="action-group">
@@ -75,7 +75,40 @@
             <button>筛选</button>
         </section>
 
-        <section class="table-panel">
+        <section class="table-panel" id="transfer-advice">
+            <div class="panel-title">
+                <h2>调货建议</h2>
+                <p>只展示建议调货量大于 0 的 SKU，当前库存预警口径仅计算 006 库。</p>
+            </div>
+
+            <div class="table-wrap">
+                {% if transfer_records %}
+                    <table>
+                        <thead>
+                        <tr>
+                            {% for key in transfer_records[0].keys() %}
+                                <th>{{ key }}</th>
+                            {% endfor %}
+                        </tr>
+                        </thead>
+
+                        <tbody>
+                        {% for row in transfer_records %}
+                            <tr class="{% if row['建议调货量'] > 0 %}row-yellow{% endif %}">
+                                {% for value in row.values() %}
+                                    <td>{{ value }}</td>
+                                {% endfor %}
+                            </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                {% else %}
+                    <div class="empty-state">当前没有需要调货的 SKU。</div>
+                {% endif %}
+            </div>
+        </section>
+
+        <section class="table-panel" id="warning-detail">
             <div class="panel-title">
                 <h2>预警明细</h2>
                 <p>红色代表已缺货，黄色代表库存不足需要提前调货</p>
