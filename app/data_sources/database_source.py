@@ -136,7 +136,7 @@ def build_standard_data_from_database() -> pd.DataFrame:
             sku_code AS 存货编码,
             sku_name AS 存货,
             size_name AS 尺码,
-            SUM(quantity) AS 近{SAFE_DAYS}天销量
+            SUM(quantity) AS 近7天销量
         FROM sales
         WHERE {sales_date_filter}
         GROUP BY sku_code, sku_name, size_name
@@ -181,7 +181,7 @@ def build_standard_data_from_frames(
 
     sales_df["存货编码"] = sales_df["存货编码"].apply(clean_code)
     sales_df["尺码"] = sales_df["尺码"].apply(clean_size)
-    sales_df["近7天销量"] = pd.to_numeric(sales_df[f"近{SAFE_DAYS}天销量"], errors="coerce").fillna(0)
+    sales_df["近7天销量"] = pd.to_numeric(sales_df["近7天销量"], errors="coerce").fillna(0)
     sales_df["日均销量"] = sales_df["近7天销量"] / SAFE_DAYS
 
     hq_df["存货编码"] = hq_df["存货编码"].apply(clean_code)

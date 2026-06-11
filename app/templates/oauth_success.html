@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>T+ 授权成功</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="layout">
+    <main class="main">
+        <h1>T+ 授权成功</h1>
+        <p>Token 已保存。</p>
+        {% if app_name %}<p>app_name: {{ app_name }}</p>{% endif %}
+        {% if org_id %}<p>org_id: {{ org_id }}</p>{% endif %}
+        {% if user_id %}<p>user_id: {{ user_id }}</p>{% endif %}
+        {% if state %}<p>state: {{ state }}</p>{% endif %}
+    </main>
+</div>
+</body>
+</html>

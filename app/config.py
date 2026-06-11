@@ -75,6 +75,7 @@ TPLUS_TOKEN_REFRESH_SKEW_SECONDS = int(os.getenv("TPLUS_TOKEN_REFRESH_SKEW_SECON
 TPLUS_REQUEST_TIMEOUT = int(os.getenv("TPLUS_REQUEST_TIMEOUT", "20"))
 TPLUS_RETRY_TIMES = int(os.getenv("TPLUS_RETRY_TIMES", "3"))
 TPLUS_QUERY_PAGE_SIZE = int(os.getenv("TPLUS_QUERY_PAGE_SIZE", "200"))
+TPLUS_DEBUG = os.getenv("TPLUS_DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}
 TPLUS_INVENTORY_QUERY_ENDPOINT = os.getenv(
     "TPLUS_INVENTORY_QUERY_ENDPOINT",
     "/tplus/api/v2/inventory/Query",
@@ -87,4 +88,4 @@ WARNING_WAREHOUSE_CODE = os.getenv("WARNING_WAREHOUSE_CODE", "006").strip()
 
 # 企业微信机器人 Webhook
 # 没有就先留空，不影响系统运行
-WECHAT_WEBHOOK = ""
+WECHAT_WEBHOOK = os.getenv("WECHAT_WEBHOOK", "").strip()

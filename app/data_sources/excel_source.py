@@ -20,7 +20,14 @@ def clean_code(value):
     if pd.isna(value):
         return ""
 
-    return str(value).replace(".0", "").strip()
+    s = str(value).strip()
+    # Excel 中编码列若为纯数字会被读成浮点数（如 1001.0），只去除这种尾缀
+    if s.endswith(".0"):
+        try:
+            return str(int(float(s)))
+        except ValueError:
+            pass
+    return s
 
 
 def clean_size(value):

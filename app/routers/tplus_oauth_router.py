@@ -1,10 +1,10 @@
 import base64
 import json
 import os
-from html import escape
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
 
 from app.config import BASE_DIR, CHANJET_MESSAGE_SECRET
 from app.data_sources.tplus_openapi_source import TPlusOpenAPIClient, _extract_app_ticket
@@ -24,6 +24,7 @@ except ImportError:
 
 router = APIRouter()
 ENV_FILE = os.path.join(BASE_DIR, ".env")
+templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "app", "templates"))
 
 
 def decrypt_chanjet_message(encrypted_message: str, message_secret: str) -> dict:
@@ -45,7 +46,8 @@ def decrypt_chanjet_message(encrypted_message: str, message_secret: str) -> dict
 
 def save_chanjet_certificate(certificate: str) -> None:
     if not os.path.exists(ENV_FILE):
-        open(ENV_FILE, "a", encoding="utf-8").close()
+        with open(ENV_FILE, "a", encoding="utf-8"):
+            pass
 
     if set_key:
         set_key(ENV_FILE, "CHANJET_CERTIFICATE", certificate)
@@ -122,7 +124,7 @@ async def tplus_message_callback(request: Request):
 
 
 @router.get("/tplus/oauth/callback", response_class=HTMLResponse)
-def tplus_oauth_callback(code: str | None = None, state: str | None = None):
+def tplus_oauth_callback(request: Request, code: str | None = None, state: str | None = None):
     if not code:
         raise HTTPException(status_code=400, detail="缺少 T+ OAuth 授权码 code")
 
@@ -131,22 +133,13 @@ def tplus_oauth_callback(code: str | None = None, state: str | None = None):
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"T+ OAuth 授权失败：{exc}") from exc
 
-    app_name = escape(str(token_payload.get("app_name") or ""))
-    org_id = escape(str(token_payload.get("org_id") or ""))
-    user_id = escape(str(token_payload.get("user_id") or ""))
-    state_line = f"<p>state: {escape(state)}</p>" if state else ""
-
-    return f"""
-    <!doctype html>
-    <html lang="zh-CN">
-      <head><meta charset="utf-8"><title>T+ 授权成功</title></head>
-      <body>
-        <h1>T+ 授权成功</h1>
-        <p>Token 已保存。</p>
-        <p>app_name: {app_name}</p>
-        <p>org_id: {org_id}</p>
-        <p>user_id: {user_id}</p>
-        {state_line}
-      </body>
-    </html>
-    """
+    return templates.TemplateResponse(
+        request=request,
+        name="oauth_success.html",
+        context={
+            "app_name": token_payload.get("app_name") or "",
+            "org_id": token_payload.get("org_id") or "",
+            "user_id": token_payload.get("user_id") or "",
+            "state": state or "",
+        },
+    )

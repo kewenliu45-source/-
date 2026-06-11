@@ -11,8 +11,8 @@ def analyze_standard_data(df: pd.DataFrame) -> pd.DataFrame:
             errors="coerce"
         ).fillna(0)
 
-    # 可售天数
-    result_df["可售天数"] = 999.0
+    # 可售天数（无销量时用 inf 保证排序正确，最终展示前替换为显示值）
+    result_df["可售天数"] = float("inf")
     has_sales = result_df["日均销量"] > 0
     result_df.loc[has_sales, "可售天数"] = (
         result_df.loc[has_sales, "当前可用量"]
@@ -98,8 +98,8 @@ def analyze_standard_data(df: pd.DataFrame) -> pd.DataFrame:
 
     result_df = result_df.drop(columns=["排序"])
 
-    # 数值美化
-    result_df["可售天数"] = result_df["可售天数"].round(1)
+    # 数值美化（inf 替换为显示值后再 round）
+    result_df["可售天数"] = result_df["可售天数"].replace(float("inf"), 999).round(1)
     result_df["日均销量"] = result_df["日均销量"].round(1)
 
     return result_df

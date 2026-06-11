@@ -25,6 +25,7 @@ from app.config import (
     TPLUS_REDIRECT_URI,
     TPLUS_REQUEST_TIMEOUT,
     TPLUS_RETRY_TIMES,
+    TPLUS_DEBUG,
     TPLUS_INVENTORY_QUERY_ENDPOINT,
     TPLUS_CURRENT_STOCK_QUERY_ENDPOINT,
     TPLUS_RECENT_SALES_CACHE_FILE,
@@ -389,7 +390,7 @@ class TPlusOpenAPIClient:
         **kwargs,
     ) -> dict[str, Any]:
         url = f"{TPLUS_API_BASE_URL}{endpoint}"
-        debug_business_request = endpoint in {
+        debug_business_request = TPLUS_DEBUG and endpoint in {
             "/tplus/api/v2/inventory/Query",
             "/tplus/api/v2/currentStock/Query",
         }

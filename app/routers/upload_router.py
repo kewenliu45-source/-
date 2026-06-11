@@ -1,15 +1,19 @@
+import logging
+import os
+
 from fastapi import APIRouter, UploadFile, File, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
-import traceback
 
-from app.config import DB_TYPE
+from app.config import BASE_DIR, DB_TYPE
+
+logger = logging.getLogger(__name__)
 from app.data_sources.database_source import build_standard_data_from_database
 from app.data_sources.excel_source import build_standard_data
 from app.services.warning_service import analyze_standard_data
 
 router = APIRouter()
-templates = Jinja2Templates(directory="app/templates")
+templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "app", "templates"))
 
 
 def get_user_facing_error(exc: Exception) -> str:
@@ -124,8 +128,7 @@ async def upload_files(
         return render_analysis_result(request, standard_df, "Excel 上传")
 
     except Exception as exc:
-        error_msg = traceback.format_exc()
-        print(error_msg)
+        logger.exception("请求处理失败")
 
         return templates.TemplateResponse(
             request=request,
@@ -145,8 +148,7 @@ async def analyze_from_database(request: Request):
         return render_analysis_result(request, standard_df, data_source_name)
 
     except Exception as exc:
-        error_msg = traceback.format_exc()
-        print(error_msg)
+        logger.exception("请求处理失败")
 
         return templates.TemplateResponse(
             request=request,
