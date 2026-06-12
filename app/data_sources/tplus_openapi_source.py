@@ -686,25 +686,47 @@ def build_standard_data_from_tplus_openapi() -> pd.DataFrame:
     inventory_df = _build_inventory_master_df(inventory_records)
     stock_df = _build_current_stock_df(stock_records)
 
+    # 以销售为主，匹配库存数据
     inventory_summary_df = inventory_df.groupby("存货编码", as_index=False).agg(
         {
             "存货": "first",
         }
     )
-    standard_df = stock_df.merge(
-        inventory_summary_df,
-        on="存货编码",
-        how="left",
-        suffixes=("_库存", ""),
+    stock_summary_df = stock_df.groupby(["存货编码", "尺码"], as_index=False).agg(
+        {
+            "仓库编码": "first",
+            "仓库": "first",
+            "存货": "first",
+            "当前现存量": "sum",
+            "当前可用量": "sum",
+        }
     )
 
+    # 销售 LEFT JOIN 库存
+    standard_df = sales_df.merge(
+        stock_summary_df,
+        on=["存货编码", "尺码"],
+        how="left",
+        suffixes=("", "_库存"),
+    )
+
+    # 补充存货名称
     if "存货_库存" in standard_df.columns:
         standard_df["存货"] = standard_df["存货"].fillna(standard_df["存货_库存"])
         standard_df = standard_df.drop(columns=["存货_库存"])
 
-    standard_df = standard_df.merge(sales_df, on=["存货编码", "尺码"], how="left")
-    standard_df["近7天销量"] = standard_df["近7天销量"].fillna(0)
-    standard_df["日均销量"] = standard_df["日均销量"].fillna(0)
+    # 再次补充存货名称（从存货档案）
+    standard_df = standard_df.merge(
+        inventory_summary_df,
+        on="存货编码",
+        how="left",
+        suffixes=("", "_档案"),
+    )
+    if "存货_档案" in standard_df.columns:
+        standard_df["存货"] = standard_df["存货"].fillna(standard_df["存货_档案"])
+        standard_df = standard_df.drop(columns=["存货_档案"])
+
+    # 填充空值
     standard_df["仓库编码"] = standard_df["仓库编码"].fillna("")
     standard_df["仓库"] = standard_df["仓库"].fillna("")
     standard_df["当前现存量"] = standard_df["当前现存量"].fillna(0)

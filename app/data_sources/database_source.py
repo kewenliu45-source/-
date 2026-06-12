@@ -14,7 +14,7 @@ from app.config import (
     SAFE_DAYS,
     WARNING_WAREHOUSE_CODE,
 )
-from app.data_sources.base import ensure_standard_columns
+from app.data_sources.base import ensure_standard_columns, build_standard_data_from_frames
 from app.data_sources.excel_source import clean_code, clean_size
 
 
@@ -139,6 +139,7 @@ def build_standard_data_from_database() -> pd.DataFrame:
             SUM(quantity) AS 近7天销量
         FROM sales
         WHERE {sales_date_filter}
+          AND warehouse_code = :warning_warehouse_code
         GROUP BY sku_code, sku_name, size_name
     """
 
@@ -156,73 +157,13 @@ def build_standard_data_from_database() -> pd.DataFrame:
         engine,
         params={"warning_warehouse_code": WARNING_WAREHOUSE_CODE},
     )
-    sales_df = read_sql_dataframe(sales_sql, engine)
+    sales_df = pd.read_sql_query(
+        text(sales_sql),
+        engine,
+        params={"warning_warehouse_code": WARNING_WAREHOUSE_CODE},
+    )
     hq_df = read_sql_dataframe(hq_sql, engine)
 
     return build_standard_data_from_frames(inventory_df, sales_df, hq_df)
 
 
-def build_standard_data_from_frames(
-    inventory_df: pd.DataFrame,
-    sales_df: pd.DataFrame,
-    hq_df: pd.DataFrame,
-) -> pd.DataFrame:
-    for df in [inventory_df, sales_df, hq_df]:
-        df.columns = df.columns.astype(str).str.strip()
-
-    inventory_df["存货编码"] = inventory_df["存货编码"].apply(clean_code)
-    inventory_df["尺码"] = inventory_df["尺码"].apply(clean_size)
-    if WARNING_WAREHOUSE_CODE and "仓库编码" in inventory_df.columns:
-        inventory_df = inventory_df[
-            inventory_df["仓库编码"].astype(str).str.strip() == WARNING_WAREHOUSE_CODE
-        ].copy()
-    inventory_df["当前现存量"] = pd.to_numeric(inventory_df["当前现存量"], errors="coerce").fillna(0)
-    inventory_df["当前可用量"] = pd.to_numeric(inventory_df["当前可用量"], errors="coerce").fillna(0)
-
-    sales_df["存货编码"] = sales_df["存货编码"].apply(clean_code)
-    sales_df["尺码"] = sales_df["尺码"].apply(clean_size)
-    sales_df["近7天销量"] = pd.to_numeric(sales_df["近7天销量"], errors="coerce").fillna(0)
-    sales_df["日均销量"] = sales_df["近7天销量"] / SAFE_DAYS
-
-    hq_df["存货编码"] = hq_df["存货编码"].apply(clean_code)
-    hq_df["尺码"] = hq_df["尺码"].apply(clean_size)
-    hq_df["总部库存"] = pd.to_numeric(hq_df["总部库存"], errors="coerce").fillna(0)
-
-    inventory_group_df = (
-        inventory_df
-        .groupby(["存货编码", "尺码"], as_index=False)
-        .agg({
-            "当前现存量": "sum",
-            "当前可用量": "sum",
-            "仓库编码": "first",
-            "仓库": "first",
-            "存货": "first",
-        })
-    )
-
-    standard_df = sales_df.merge(
-        inventory_group_df,
-        on=["存货编码", "尺码"],
-        how="left",
-        suffixes=("", "_库存"),
-    )
-
-    if "存货_库存" in standard_df.columns:
-        standard_df["存货"] = standard_df["存货"].fillna(standard_df["存货_库存"])
-        standard_df = standard_df.drop(columns=["存货_库存"])
-
-    hq_group_df = (
-        hq_df
-        .groupby(["存货编码", "尺码"], as_index=False)["总部库存"]
-        .sum()
-    )
-
-    standard_df = standard_df.merge(hq_group_df, on=["存货编码", "尺码"], how="left")
-
-    standard_df["仓库编码"] = standard_df["仓库编码"].fillna("")
-    standard_df["仓库"] = standard_df["仓库"].fillna("")
-    standard_df["当前现存量"] = standard_df["当前现存量"].fillna(0)
-    standard_df["当前可用量"] = standard_df["当前可用量"].fillna(0)
-    standard_df["总部库存"] = standard_df["总部库存"].fillna(0)
-
-    return ensure_standard_columns(standard_df)

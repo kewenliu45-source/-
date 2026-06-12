@@ -38,6 +38,8 @@
                     <button class="summary-btn" type="submit">发送每日汇总</button>
                 </form>
                 <a class="download-btn" href="/download/{{ output_filename }}">下载Excel</a>
+                <a class="download-btn" href="/export/sales" target="_blank">导出销售表</a>
+                <a class="download-btn" href="/export/inventory" target="_blank">导出库存表</a>
             </div>
         </header>
 
@@ -94,7 +96,9 @@
 
                         <tbody>
                         {% for row in transfer_records %}
-                            <tr class="{% if row['建议调货量'] > 0 %}row-yellow{% endif %}">
+                            <tr class="
+                                {% if '立即' in row['调货建议'] %}row-red{% elif '尽快' in row['调货建议'] %}row-yellow{% endif %}
+                            ">
                                 {% for value in row.values() %}
                                     <td>{{ value }}</td>
                                 {% endfor %}

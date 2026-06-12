@@ -1,7 +1,8 @@
 import pandas as pd
 import numpy as np
 
-from app.data_sources.base import ensure_standard_columns
+from app.config import SAFE_DAYS, WARNING_WAREHOUSE_CODE
+from app.data_sources.base import ensure_standard_columns, build_standard_data_from_frames
 
 # ========= 通用清洗 =========
 
@@ -45,9 +46,30 @@ def clean_size(value):
 
 def build_sales_standard_df(sales_file):
 
-    sales_df = pd.read_excel(sales_file, header=7)
+    # 先读取前几行，检测表头位置
+    preview = pd.read_excel(sales_file, header=None, nrows=10)
+
+    # 查找包含 "存货编码" 的行作为表头
+    header_row = 0
+    for i, row in preview.iterrows():
+        row_str = " ".join(str(v) for v in row.values if pd.notna(v))
+        if "存货编码" in row_str:
+            header_row = i
+            break
+
+    # 读取时指定字符串列，避免数字被自动转换
+    sales_df = pd.read_excel(
+        sales_file,
+        header=header_row,
+        dtype={"存货编码": str, "尺码": str, "仓库编码": str}
+    )
 
     sales_df = clean_columns(sales_df)
+
+    # 填充 NaN 值，避免 groupby 时丢失数据
+    for col in ["存货", "仓库", "销售单位"]:
+        if col in sales_df.columns:
+            sales_df[col] = sales_df[col].fillna("")
 
     sales_df["存货编码"] = sales_df["存货编码"].apply(clean_code)
 
@@ -57,6 +79,14 @@ def build_sales_standard_df(sales_file):
         sales_df["数量"],
         errors="coerce"
     ).fillna(0)
+
+    # 按仓库筛选（与库存表保持一致）
+    # 处理仓库编码格式：6.0 -> 6 -> 006
+    if WARNING_WAREHOUSE_CODE and "仓库编码" in sales_df.columns:
+        sales_df["仓库编码"] = pd.to_numeric(sales_df["仓库编码"], errors="coerce")
+        sales_df = sales_df[sales_df["仓库编码"].notna()]
+        sales_df["仓库编码"] = sales_df["仓库编码"].astype(int).astype(str).str.zfill(3)
+        sales_df = sales_df[sales_df["仓库编码"] == WARNING_WAREHOUSE_CODE]
 
     # 只保留有销量
     sales_df = sales_df[sales_df["数量"] > 0]
@@ -77,7 +107,7 @@ def build_sales_standard_df(sales_file):
     )
 
     sales_standard_df["日均销量"] = (
-        sales_standard_df["近7天销量"] / 7
+        sales_standard_df["近7天销量"] / SAFE_DAYS
     )
 
     return sales_standard_df
@@ -87,7 +117,23 @@ def build_sales_standard_df(sales_file):
 
 def build_inventory_standard_df(inventory_file):
 
-    inventory_df = pd.read_excel(inventory_file, header=6)
+    # 先读取前几行，检测表头位置
+    preview = pd.read_excel(inventory_file, header=None, nrows=10)
+
+    # 查找包含 "存货编码" 的行作为表头
+    header_row = 0
+    for i, row in preview.iterrows():
+        row_str = " ".join(str(v) for v in row.values if pd.notna(v))
+        if "存货编码" in row_str:
+            header_row = i
+            break
+
+    # 读取时指定字符串列，避免数字被自动转换
+    inventory_df = pd.read_excel(
+        inventory_file,
+        header=header_row,
+        dtype={"存货编码": str, "尺码": str, "仓库编码": str}
+    )
 
     inventory_df = clean_columns(inventory_df)
 
@@ -135,7 +181,14 @@ def build_hq_standard_df(hq_file):
 
     hq_df = clean_columns(hq_df)
 
-    hq_df["存货编码"] = hq_df["存货编码"].apply(clean_code)
+    # 总部库存表存货编码取后11位，与销售表/库存表匹配
+    def clean_hq_code(value):
+        s = clean_code(value)
+        if len(s) > 11:
+            return s[-11:]
+        return s
+
+    hq_df["存货编码"] = hq_df["存货编码"].apply(clean_hq_code)
 
     id_cols = [
         "检索号",
@@ -166,8 +219,10 @@ def build_hq_standard_df(hq_file):
         errors="coerce"
     ).fillna(0)
 
+    # 过滤掉存货编码为空的行（如"总计"行）
     hq_long_df = hq_long_df[
-        hq_long_df["总部库存"] > 0
+        (hq_long_df["总部库存"] > 0) &
+        (hq_long_df["存货编码"].astype(str).str.strip() != "")
     ]
 
     hq_standard_df = (
@@ -187,71 +242,22 @@ def build_hq_standard_df(hq_file):
 def build_standard_data(
     inventory_file,
     sales_file,
-    hq_file
+    hq_file=None
 ):
+    """
+    从 Excel 文件构建标准数据。
 
+    Args:
+        inventory_file: 库存表文件对象
+        sales_file: 销售表文件对象
+        hq_file: 总部库存表文件对象，可选
+
+    Returns:
+        标准 DataFrame
+    """
     sales_df = build_sales_standard_df(sales_file)
-
     inventory_df = build_inventory_standard_df(inventory_file)
+    hq_df = build_hq_standard_df(hq_file) if hq_file else None
 
-    hq_df = build_hq_standard_df(hq_file)
-
-    # 聚合库存
-    inventory_group_df = (
-        inventory_df
-        .groupby(
-            ["存货编码", "尺码"],
-            as_index=False
-        )
-        .agg({
-            "当前现存量": "sum",
-            "当前可用量": "sum",
-            "仓库编码": "first",
-            "仓库": "first",
-            "存货": "first"
-        })
-    )
-
-    # 销售 + 库存
-    standard_df = sales_df.merge(
-        inventory_group_df,
-        on=["存货编码", "尺码"],
-        how="left",
-        suffixes=("", "_库存")
-    )
-
-    # 商品名补全
-    if "存货_库存" in standard_df.columns:
-
-        standard_df["存货"] = standard_df["存货"].fillna(
-            standard_df["存货_库存"]
-        )
-
-        standard_df = standard_df.drop(
-            columns=["存货_库存"]
-        )
-
-    # 合并总部库存
-    standard_df = standard_df.merge(
-        hq_df,
-        on=["存货编码", "尺码"],
-        how="left"
-    )
-
-    # 空值处理
-    standard_df["当前现存量"] = (
-        standard_df["当前现存量"]
-        .fillna(0)
-    )
-
-    standard_df["当前可用量"] = (
-        standard_df["当前可用量"]
-        .fillna(0)
-    )
-
-    standard_df["总部库存"] = (
-        standard_df["总部库存"]
-        .fillna(0)
-    )
-
-    return ensure_standard_columns(standard_df)
+    # Excel 入口已在各 build_*_df 函数中清洗过，标记 already_cleaned=True
+    return build_standard_data_from_frames(inventory_df, sales_df, hq_df, already_cleaned=True)

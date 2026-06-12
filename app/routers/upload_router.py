@@ -2,10 +2,10 @@ import logging
 import os
 
 from fastapi import APIRouter, UploadFile, File, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
-from app.config import BASE_DIR, DB_TYPE
+from app.config import BASE_DIR, DB_TYPE, OUTPUT_DIR
 
 logger = logging.getLogger(__name__)
 from app.data_sources.database_source import build_standard_data_from_database
@@ -116,13 +116,13 @@ async def upload_files(
     request: Request,
     inventory_file: UploadFile = File(...),
     sales_file: UploadFile = File(...),
-    hq_file: UploadFile = File(...)
+    hq_file: UploadFile | None = File(None)
 ):
     try:
         standard_df = build_standard_data(
             inventory_file.file,
             sales_file.file,
-            hq_file.file
+            hq_file.file if hq_file else None
         )
 
         return render_analysis_result(request, standard_df, "Excel 上传")
@@ -140,9 +140,29 @@ async def upload_files(
 
 
 @router.post("/database-analysis", response_class=HTMLResponse)
-async def analyze_from_database(request: Request):
+async def analyze_from_database(
+    request: Request,
+    hq_file: UploadFile | None = File(None)
+):
     try:
+        from app.data_sources.excel_source import build_hq_standard_df
+
+        # 从数据库获取库存和销售数据
         standard_df = build_standard_data_from_database()
+
+        # 如果上传了总部库存表，合并到结果中
+        if hq_file:
+            hq_df = build_hq_standard_df(hq_file.file)
+            if not hq_df.empty:
+                # 按存货编码+尺码合并总部库存
+                standard_df = standard_df.drop(columns=["总部库存"], errors="ignore")
+                standard_df = standard_df.merge(
+                    hq_df,
+                    on=["存货编码", "尺码"],
+                    how="left"
+                )
+                standard_df["总部库存"] = standard_df["总部库存"].fillna(0)
+
         data_source_name = get_database_data_source_name()
 
         return render_analysis_result(request, standard_df, data_source_name)
@@ -157,3 +177,246 @@ async def analyze_from_database(request: Request):
                 "error": get_user_facing_error(exc)
             }
         )
+
+
+@router.get("/export/sales")
+async def export_sales_table():
+    """导出近7天销售表（006仓库）- 表头与原始 Excel 一致"""
+    try:
+        import io
+        import pandas as pd
+        from datetime import datetime, timedelta
+        from app.config import SAFE_DAYS, WARNING_WAREHOUSE_CODE
+
+        # 定义完整的表头列
+        full_columns = [
+            "单据日期", "创建时间", "单据编号", "业务类型", "票据类型",
+            "客户编码", "客户", "部门编码", "部门", "业务员编码", "业务员",
+            "送货人编码", "送货人", "送货日期", "发货人编码", "发货人",
+            "结算客户编码", "结算客户", "收款到期日", "收款方式", "运输方式",
+            "现结金额", "抹零", "单据状态", "整单结款状态",
+            "存货编码", "存货", "规格型号", "尺码", "仓库编码", "仓库", "销售单位", "数量"
+        ]
+
+        if DB_TYPE == "mock":
+            data = [
+                {
+                    "单据日期": datetime.now().strftime("%Y-%m-%d"),
+                    "创建时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "单据编号": "MOCK001", "业务类型": "销售", "票据类型": "",
+                    "客户编码": "C001", "客户": "测试客户", "部门编码": "D01", "部门": "销售部",
+                    "业务员编码": "S01", "业务员": "张三", "送货人编码": "", "送货人": "",
+                    "送货日期": "", "发货人编码": "", "发货人": "",
+                    "结算客户编码": "C001", "结算客户": "测试客户", "收款到期日": "", "收款方式": "",
+                    "运输方式": "", "现结金额": 0, "抹零": 0, "单据状态": "已完成", "整单结款状态": "",
+                    "存货编码": "SKU001", "存货": "测试商品A", "规格型号": "", "尺码": "M",
+                    "仓库编码": "006", "仓库": "销售一库", "销售单位": "件", "数量": 35
+                },
+                {
+                    "单据日期": datetime.now().strftime("%Y-%m-%d"),
+                    "创建时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "单据编号": "MOCK002", "业务类型": "销售", "票据类型": "",
+                    "客户编码": "C002", "客户": "测试客户2", "部门编码": "D01", "部门": "销售部",
+                    "业务员编码": "S02", "业务员": "李四", "送货人编码": "", "送货人": "",
+                    "送货日期": "", "发货人编码": "", "发货人": "",
+                    "结算客户编码": "C002", "结算客户": "测试客户2", "收款到期日": "", "收款方式": "",
+                    "运输方式": "", "现结金额": 0, "抹零": 0, "单据状态": "已完成", "整单结款状态": "",
+                    "存货编码": "SKU002", "存货": "测试商品B", "规格型号": "", "尺码": "L",
+                    "仓库编码": "006", "仓库": "销售一库", "销售单位": "件", "数量": 21
+                },
+            ]
+            df = pd.DataFrame(data)
+        elif DB_TYPE in {"tplus", "openapi", "chanjet"}:
+            # T+ 模式：使用缓存的销售数据
+            from app.data_sources.tplus_openapi_source import TPlusOpenAPIClient
+            client = TPlusOpenAPIClient()
+            df = client.query_recent_sale_delivery_sales(days=SAFE_DAYS)
+            # 重命名列以匹配 Excel 格式
+            df = df.rename(columns={"近7天销量": "数量"})
+            # 添加缺失的列
+            if "存货" not in df.columns:
+                df["存货"] = ""
+            df["仓库编码"] = WARNING_WAREHOUSE_CODE
+            df["仓库"] = "销售一库"
+            df["销售单位"] = "件"
+        else:
+            from sqlalchemy import create_engine, text
+            from app.data_sources.database_source import build_database_url
+
+            engine = create_engine(build_database_url())
+
+            if DB_TYPE == "sqlserver":
+                sales_date_filter = f"business_date >= DATEADD(day, -{SAFE_DAYS}, GETDATE())"
+            else:
+                sales_date_filter = f"business_date >= CURRENT_DATE - INTERVAL '{SAFE_DAYS} day'"
+
+            sales_sql = f"""
+                SELECT
+                    business_date AS 单据日期,
+                    create_time AS 创建时间,
+                    voucher_code AS 单据编号,
+                    business_type AS 业务类型,
+                    invoice_type AS 票据类型,
+                    customer_code AS 客户编码,
+                    customer_name AS 客户,
+                    department_code AS 部门编码,
+                    department_name AS 部门,
+                    salesperson_code AS 业务员编码,
+                    salesperson_name AS 业务员,
+                    delivery_person_code AS 送货人编码,
+                    delivery_person_name AS 送货人,
+                    delivery_date AS 送货日期,
+                    shipper_code AS 发货人编码,
+                    shipper_name AS 发货人,
+                    settlement_customer_code AS 结算客户编码,
+                    settlement_customer_name AS 结算客户,
+                    payment_due_date AS 收款到期日,
+                    payment_method AS 收款方式,
+                    shipping_method AS 运输方式,
+                    cash_amount AS 现结金额,
+                    rounding AS 抹零,
+                    voucher_status AS 单据状态,
+                    payment_status AS 整单结款状态,
+                    sku_code AS 存货编码,
+                    sku_name AS 存货,
+                    specification AS 规格型号,
+                    size_name AS 尺码,
+                    warehouse_code AS 仓库编码,
+                    warehouse_name AS 仓库,
+                    sales_unit AS 销售单位,
+                    SUM(quantity) AS 数量
+                FROM sales
+                WHERE {sales_date_filter}
+                  AND warehouse_code = :warning_warehouse_code
+                GROUP BY business_date, create_time, voucher_code, business_type, invoice_type,
+                         customer_code, customer_name, department_code, department_name,
+                         salesperson_code, salesperson_name, delivery_person_code, delivery_person_name,
+                         delivery_date, shipper_code, shipper_name, settlement_customer_code,
+                         settlement_customer_name, payment_due_date, payment_method, shipping_method,
+                         cash_amount, rounding, voucher_status, payment_status,
+                         sku_code, sku_name, specification, size_name, warehouse_code, warehouse_name, sales_unit
+                ORDER BY business_date DESC
+            """
+
+            df = pd.read_sql_query(
+                text(sales_sql),
+                engine,
+                params={"warning_warehouse_code": WARNING_WAREHOUSE_CODE},
+            )
+
+        # 添加缺失的列
+        for col in full_columns:
+            if col not in df.columns:
+                df[col] = ""
+
+        # 确保列顺序与原始 Excel 一致
+        df = df[full_columns]
+
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, sheet_name='近7天销售表', index=False)
+        output.seek(0)
+
+        return StreamingResponse(
+            output,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": "attachment; filename=sales_report.xlsx"}
+        )
+
+    except Exception as exc:
+        logger.exception("导出销售表失败")
+        return HTMLResponse(content=f"导出失败: {str(exc)}", status_code=500)
+
+
+@router.get("/export/inventory")
+async def export_inventory_table():
+    """导出库存表（006仓库）- 表头与原始 Excel 一致"""
+    try:
+        import io
+        import pandas as pd
+        from app.config import WARNING_WAREHOUSE_CODE
+
+        if DB_TYPE == "mock":
+            data = [
+                {"仓库编码": "006", "仓库": "销售一库", "存货编码": "SKU001", "存货": "测试商品A", "规格型号": "", "主计量": "件", "尺码": "M", "现存量(主)": 8, "可用量(主)": 4},
+                {"仓库编码": "006", "仓库": "销售一库", "存货编码": "SKU002", "存货": "测试商品B", "规格型号": "", "主计量": "件", "尺码": "L", "现存量(主)": 0, "可用量(主)": 0},
+            ]
+            df = pd.DataFrame(data)
+        elif DB_TYPE in {"tplus", "openapi", "chanjet"}:
+            # T+ 模式：从 T+ API 获取库存数据
+            from app.data_sources.tplus_openapi_source import TPlusOpenAPIClient
+            client = TPlusOpenAPIClient()
+            stock_records = client.query_current_stock()
+
+            # 转换为 DataFrame
+            rows = []
+            for item in stock_records:
+                from app.data_sources.tplus_openapi_source import _field, _to_number, _first_dynamic_value
+                from app.data_sources.excel_source import clean_code, clean_size
+
+                warehouse_code = str(_field(item, "WarehouseCode", "warehouseCode", "WhCode", "whCode") or "")
+                if WARNING_WAREHOUSE_CODE and warehouse_code != WARNING_WAREHOUSE_CODE:
+                    continue
+
+                rows.append({
+                    "仓库编码": warehouse_code,
+                    "仓库": str(_field(item, "WarehouseName", "warehouseName", "WhName", "whName") or ""),
+                    "存货编码": clean_code(_field(item, "InventoryCode", "inventoryCode", "Code", "code", "InvCode")),
+                    "存货": str(_field(item, "InventoryName", "inventoryName", "Name", "name", "InvName") or ""),
+                    "规格型号": str(_field(item, "Specification", "specification", "Spec", "spec") or ""),
+                    "主计量": str(_field(item, "Unit", "unit", "MainUnit", "mainUnit") or "件"),
+                    "尺码": clean_size(_first_dynamic_value(item)),
+                    "现存量(主)": _to_number(_field(item, "ExistingQuantity", "existingQuantity", "Quantity", "quantity")),
+                    "可用量(主)": _to_number(_field(item, "AvailableQuantity", "availableQuantity", "AvailableQty", "availableQty")),
+                })
+            df = pd.DataFrame(rows)
+        else:
+            from sqlalchemy import create_engine, text
+            from app.data_sources.database_source import build_database_url
+
+            engine = create_engine(build_database_url())
+
+            inventory_sql = """
+                SELECT
+                    warehouse_code AS 仓库编码,
+                    warehouse_name AS 仓库,
+                    sku_code AS 存货编码,
+                    sku_name AS 存货,
+                    specification AS 规格型号,
+                    unit AS 主计量,
+                    size_name AS 尺码,
+                    current_qty AS "现存量(主)",
+                    available_qty AS "可用量(主)"
+                FROM inventory
+                WHERE warehouse_code = :warning_warehouse_code
+                ORDER BY sku_code
+            """
+
+            df = pd.read_sql_query(
+                text(inventory_sql),
+                engine,
+                params={"warning_warehouse_code": WARNING_WAREHOUSE_CODE},
+            )
+
+        # 添加缺失的列
+        for col in ["规格型号", "主计量"]:
+            if col not in df.columns:
+                df[col] = ""
+
+        # 确保列顺序与原始 Excel 一致
+        df = df[["仓库编码", "仓库", "存货编码", "存货", "规格型号", "主计量", "尺码", "现存量(主)", "可用量(主)"]]
+
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, sheet_name='库存表', index=False)
+        output.seek(0)
+
+        return StreamingResponse(
+            output,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": "attachment; filename=inventory_report.xlsx"}
+        )
+
+    except Exception as exc:
+        logger.exception("导出库存表失败")
+        return HTMLResponse(content=f"导出失败: {str(exc)}", status_code=500)

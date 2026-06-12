@@ -86,12 +86,12 @@
                     </label>
 
                     <label class="upload-box">
-                        <input type="file" name="hq_file" accept=".xlsx,.xls" required>
+                        <input type="file" name="hq_file" accept=".xlsx,.xls">
                         <span class="upload-step">03</span>
                         <span class="upload-icon">🏢</span>
                         <span class="upload-content">
-                            <strong>总部库存二维表</strong>
-                            <small>系统会自动把横向尺码转换为可匹配数据</small>
+                            <strong>总部库存二维表（可选）</strong>
+                            <small>如无总部库存数据，系统将默认为 0</small>
                             <em data-empty="未选择文件">未选择文件</em>
                         </span>
                     </label>
@@ -105,12 +105,24 @@
                     </div>
                 </form>
 
-                <form class="database-form" action="/database-analysis" method="post">
+                <form class="database-form" action="/database-analysis" method="post" enctype="multipart/form-data">
                     <div class="database-source">
                         <div>
                             <span class="eyebrow">客户数据库</span>
                             <h3>从数据库直接读取库存数据</h3>
                             <p>未连接客户 VPN 时，系统默认使用模拟数据库数据验证流程；到客户现场后切换数据库配置即可。</p>
+                        </div>
+                        <label class="upload-box small">
+                            <input type="file" name="hq_file" accept=".xlsx,.xls">
+                            <span class="upload-content">
+                                <strong>总部库存表（可选）</strong>
+                                <small>如需调货建议，请上传总部库存二维表</small>
+                                <em data-empty="未选择文件">未选择文件</em>
+                            </span>
+                        </label>
+                        <div class="export-actions">
+                            <a class="export-btn" href="/export/sales" target="_blank">📥 导出近7天销售表</a>
+                            <a class="export-btn" href="/export/inventory" target="_blank">📥 导出库存表</a>
                         </div>
                         <button class="secondary-btn" type="submit">从数据库分析</button>
                     </div>

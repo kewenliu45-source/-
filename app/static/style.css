@@ -680,3 +680,32 @@ td {
         width: 100%;
     }
 }
+
+/* 导出按钮样式 */
+.export-actions {
+    display: flex;
+    gap: 12px;
+    margin: 16px 0;
+}
+
+.export-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 16px;
+    background: #f0f7ff;
+    color: #1f6feb;
+    border: 1px solid #d0e3ff;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    text-decoration: none;
+    transition: all 0.2s;
+    cursor: pointer;
+}
+
+.export-btn:hover {
+    background: #1f6feb;
+    color: #fff;
+    border-color: #1f6feb;
+}

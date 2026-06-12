@@ -57,8 +57,12 @@ def analyze_standard_data(df: pd.DataFrame) -> pd.DataFrame:
 
     # 调货建议
     def get_transfer_advice(row):
-        suggest_qty = int(row["建议调货量"])
-        hq_available_qty = int(row["总部可调数量"])
+        try:
+            suggest_qty = int(float(row["建议调货量"]))
+            hq_available_qty = int(float(row["总部可调数量"]))
+        except (ValueError, TypeError):
+            suggest_qty = 0
+            hq_available_qty = 0
 
         if row["预警状态"] == "红色预警":
             action = "建议立即调货"
