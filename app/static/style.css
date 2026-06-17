@@ -9,6 +9,7 @@
     --green: #16a34a;
     --amber: #d97706;
     --red: #dc2626;
+    --orange: #E19A75;
     --sidebar: #111827;
     --sidebar-soft: #1f2937;
     --shadow: 0 18px 45px rgba(31, 41, 55, 0.10);
@@ -46,6 +47,9 @@ a {
     padding: 24px 18px;
     color: #e5e7eb;
     background: linear-gradient(180deg, var(--sidebar), #0b1220);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
 }
 
 .logo {
@@ -246,6 +250,10 @@ a {
     color: var(--red);
 }
 
+.stat-card.orange strong {
+    color: var(--orange);
+}
+
 .stat-card.warning strong {
     color: var(--amber);
 }
@@ -256,6 +264,16 @@ a {
 
 .stat-card.primary strong {
     color: var(--primary);
+}
+
+.warning-banner {
+    background: #fffbeb;
+    color: #92400e;
+    border: 1px solid #fde68a;
+    border-radius: 8px;
+    padding: 12px 16px;
+    font-size: 14px;
+    margin-bottom: 16px;
 }
 
 .upload-shell {
@@ -590,6 +608,10 @@ td {
     background: #fee2e2;
 }
 
+.row-orange {
+    background: #fbe8db;
+}
+
 .row-yellow {
     background: #fef3c7;
 }
@@ -708,4 +730,62 @@ td {
     background: #1f6feb;
     color: #fff;
     border-color: #1f6feb;
+}
+
+/* ---------- 侧边栏用户信息 ---------- */
+.sidebar-user {
+    margin-top: auto;
+    padding-top: 20px;
+    border-top: 1px solid rgba(255,255,255,0.1);
+}
+
+.user-info {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.user-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: var(--primary, #2563eb);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    font-weight: 700;
+    flex-shrink: 0;
+}
+
+.user-info div {
+    display: flex;
+    flex-direction: column;
+}
+
+.user-info strong {
+    font-size: 14px;
+    color: #f1f5f9;
+}
+
+.user-info small {
+    font-size: 12px;
+    color: #94a3b8;
+}
+
+.logout-link {
+    display: inline-block;
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    color: #94a3b8;
+    text-decoration: none;
+    transition: all 0.2s;
+}
+
+.logout-link:hover {
+    background: rgba(255,255,255,0.08);
+    color: #e2e8f0;
 }

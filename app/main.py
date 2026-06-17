@@ -22,12 +22,24 @@ app = FastAPI(title="智能库存预警系统")
 class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
+        raw_path = request.scope.get("raw_path", b"")
+        raw_path_text = raw_path.decode("utf-8", errors="replace") if isinstance(raw_path, bytes) else str(raw_path)
         # 公开路径直接放行
-        if is_public_path(path):
+        if is_public_path(path) or is_public_path(raw_path_text):
             return await call_next(request)
         # 已登录用户放行
         if get_current_user(request) is not None:
             return await call_next(request)
+        print(
+            "[AUTH-REDIRECT]",
+            {
+                "path": path,
+                "raw_path": raw_path_text,
+                "x_forwarded_prefix": request.headers.get("x-forwarded-prefix", ""),
+                "x_original_uri": request.headers.get("x-original-uri", ""),
+                "x_rewrite_url": request.headers.get("x-rewrite-url", ""),
+            },
+        )
         # 未登录 → 重定向到登录页
         return RedirectResponse("/login", status_code=303)
 
@@ -35,7 +47,14 @@ class AuthMiddleware(BaseHTTPMiddleware):
 app.add_middleware(AuthMiddleware)
 
 # ---------- Session 中间件（后添加 → 外层 → 先执行）----------
-app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET_KEY)
+# max_age: 登录态 8 小时过期（覆盖一天工作时间）
+# https_only: 生产环境部署 HTTPS 后应改为 True
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=SESSION_SECRET_KEY,
+    max_age=8 * 3600,
+    https_only=False,
+)
 
 app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
 

@@ -108,7 +108,7 @@
         <form method="post" action="/login">
             <label>
                 <span>用户名</span>
-                <input type="text" name="username" required autofocus placeholder="请输入用户名">
+                <input type="text" name="username" required autofocus placeholder="请输入用户名" value="{{ username or '' }}">
             </label>
             <label>
                 <span>密码</span>

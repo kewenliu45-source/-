@@ -11,6 +11,21 @@ def analyze_standard_data(df: pd.DataFrame) -> pd.DataFrame:
             errors="coerce"
         ).fillna(0)
 
+    # 兼容：近90天销量缺失时默认 0
+    if "近90天销量" not in result_df.columns:
+        result_df["近90天销量"] = 0
+    result_df["近90天销量"] = pd.to_numeric(result_df["近90天销量"], errors="coerce").fillna(0)
+
+    # 兼容：当前现存量缺失时用当前可用量兜底
+    if "当前现存量" not in result_df.columns:
+        result_df["当前现存量"] = result_df["当前可用量"]
+    result_df["当前现存量"] = pd.to_numeric(result_df["当前现存量"], errors="coerce").fillna(0)
+
+    # 兼容：近7天销量缺失时用日均销量*7兜底，否则默认 0
+    if "近7天销量" not in result_df.columns:
+        result_df["近7天销量"] = result_df["日均销量"] * 7
+    result_df["近7天销量"] = pd.to_numeric(result_df["近7天销量"], errors="coerce").fillna(0)
+
     # 可售天数（无销量时用 inf 保证排序正确，最终展示前替换为显示值）
     result_df["可售天数"] = float("inf")
     has_sales = result_df["日均销量"] > 0
@@ -40,15 +55,29 @@ def analyze_standard_data(df: pd.DataFrame) -> pd.DataFrame:
     )
 
     # 预警状态
+    # 优先级：红色 > 橙色缺码 > 黄色 > 正常
+    # 红色：当前可用量 <= 0 且 近7天销量 > 0
+    # 橙色缺码：当前现存量 <= 0 且 近90天销量 > 0（且不满足红色）
+    # 黄色：当前可用量 > 0 且 近7天销量 > 0 且 可售天数 < 7
     def get_warning_status(row):
-        if row["当前可用量"] <= 0:
+        available = row["当前可用量"]
+        sales_7 = row["近7天销量"]
+        stock = row["当前现存量"]
+        sales_90 = row["近90天销量"]
+
+        # 红色：有需求但完全无可用库存
+        if available <= 0 and sales_7 > 0:
             return "红色预警"
 
-        elif row["可售天数"] < 7:
+        # 橙色缺码：本地无现货，但近90天有销售记录
+        if stock <= 0 and sales_90 > 0:
+            return "橙色缺码"
+
+        # 黄色：有库存但可售天数不足
+        if available > 0 and sales_7 > 0 and row["可售天数"] < 7:
             return "黄色预警"
 
-        else:
-            return "正常"
+        return "正常"
 
     result_df["预警状态"] = result_df.apply(
         get_warning_status,
@@ -66,6 +95,9 @@ def analyze_standard_data(df: pd.DataFrame) -> pd.DataFrame:
 
         if row["预警状态"] == "红色预警":
             action = "建议立即调货"
+
+        elif row["预警状态"] == "橙色缺码":
+            action = "缺码待补"
 
         elif row["预警状态"] == "黄色预警":
             action = "建议尽快调货"
@@ -90,8 +122,9 @@ def analyze_standard_data(df: pd.DataFrame) -> pd.DataFrame:
     # 排序
     warning_order = {
         "红色预警": 0,
-        "黄色预警": 1,
-        "正常": 2
+        "橙色缺码": 1,
+        "黄色预警": 2,
+        "正常": 3,
     }
 
     result_df["排序"] = result_df["预警状态"].map(warning_order)

@@ -3,7 +3,7 @@ import json
 import os
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 
 from app.config import BASE_DIR, CHANJET_MESSAGE_SECRET
@@ -71,6 +71,9 @@ def save_chanjet_certificate(certificate: str) -> None:
 
 
 @router.api_route("/tplus/message/callback", methods=["GET", "POST"])
+@router.api_route("/tplus/message/callback/", methods=["GET", "POST"], include_in_schema=False)
+@router.api_route("/{callback_prefix:path}/tplus/message/callback", methods=["GET", "POST"], include_in_schema=False)
+@router.api_route("/{callback_prefix:path}/tplus/message/callback/", methods=["GET", "POST"], include_in_schema=False)
 async def tplus_message_callback(request: Request):
     payload = dict(request.query_params)
     body = {}
@@ -116,11 +119,14 @@ async def tplus_message_callback(request: Request):
         except Exception as exc:
             print(f"保存 appTicket 失败：{exc}")
 
-    return {
-        "result": "success",
-        "code": 0,
-        "msg": "success",
-    }
+    return JSONResponse(
+        {
+            "result": "success",
+            "code": 0,
+            "msg": "success",
+        },
+        headers={"X-Inventory-Callback": "tplus-message-v3"},
+    )
 
 
 @router.get("/tplus/oauth/callback", response_class=HTMLResponse)

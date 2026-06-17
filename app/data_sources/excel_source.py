@@ -163,6 +163,9 @@ def build_inventory_standard_df(inventory_file):
         ]
     ].copy()
 
+    # 在途仓是数值字段，默认为 0（T+ 路径从 currentStock 提取，Excel 路径无此数据源）
+    inventory_standard_df["在途仓"] = 0
+
     inventory_standard_df = inventory_standard_df.rename(
         columns={
             "现存量(主)": "当前现存量",
@@ -237,27 +240,136 @@ def build_hq_standard_df(hq_file):
     return hq_standard_df
 
 
+# ========= 在途库存表（未发货）=========
+
+def build_intransit_standard_df(transit_file):
+    """
+    解析在途库存表（宽表格式），输出标准长表。
+
+    在途表格式与总部二维表类似：
+    - 表头行包含 '货号/尺码' 和各尺码列
+    - 每行是一个 SKU，各尺码列的值为在途数量
+
+    只输出在途数量，不输出仓库信息（在途仓来自本地库存表）。
+
+    返回列: 存货编码, 尺码, 在途（未发货）
+    """
+    # 自动检测表头行
+    preview = pd.read_excel(transit_file, header=None, nrows=15)
+    header_row = 0
+    for i, row in preview.iterrows():
+        row_str = " ".join(str(v) for v in row.values if pd.notna(v))
+        if "货号/尺码" in row_str or "存货编码" in row_str:
+            header_row = i
+            break
+
+    transit_df = pd.read_excel(transit_file, header=header_row)
+    transit_df = clean_columns(transit_df)
+
+    # 识别编码列
+    code_col = None
+    for candidate in ["货号/尺码", "存货编码", "编码"]:
+        if candidate in transit_df.columns:
+            code_col = candidate
+            break
+    if code_col is None:
+        raise ValueError("在途库存表中未找到编码列（货号/尺码 或 存货编码）")
+
+    # 识别非尺码列（排除这些后，剩下的都是尺码列）
+    id_cols = {code_col, "K", "合计", "中/小学/幼儿园", "吊牌价", "备注", "单价", "金额",
+               "仓库", "仓库名称", "仓库编码", "在途仓"}
+    id_cols = id_cols & set(transit_df.columns)
+    size_cols = [c for c in transit_df.columns if c not in id_cols]
+
+    # 如果没有尺码列，尝试按 存货编码+尺码 的长表格式处理
+    if not size_cols:
+        if "尺码" in transit_df.columns and "在途（未发货）" in transit_df.columns:
+            result = transit_df[["存货编码", "尺码", "在途（未发货）"]].copy()
+            result["存货编码"] = result["存货编码"].apply(clean_code)
+            result["尺码"] = result["尺码"].apply(clean_size)
+            result["在途（未发货）"] = pd.to_numeric(result["在途（未发货）"], errors="coerce").fillna(0)
+            return result
+        raise ValueError("在途库存表中未识别到尺码列")
+
+    # 宽表 → 长表
+    transit_df = transit_df.rename(columns={code_col: "存货编码"})
+
+    long_df = transit_df.melt(
+        id_vars=["存货编码"],
+        value_vars=size_cols,
+        var_name="尺码",
+        value_name="在途（未发货）",
+    )
+
+    long_df["存货编码"] = long_df["存货编码"].apply(clean_code)
+    long_df["尺码"] = long_df["尺码"].apply(clean_size)
+    long_df["在途（未发货）"] = pd.to_numeric(long_df["在途（未发货）"], errors="coerce").fillna(0)
+
+    # 过滤掉数量为 0 或编码为空的行
+    long_df = long_df[
+        (long_df["在途（未发货）"] > 0) &
+        (long_df["存货编码"].astype(str).str.strip() != "")
+    ]
+
+    # 聚合：只输出 存货编码、尺码、在途（未发货）
+    result = (
+        long_df
+        .groupby(["存货编码", "尺码"], as_index=False)["在途（未发货）"]
+        .sum()
+    )
+
+    return result
+
+
 # ========= 构建标准数据层 =========
 
 def build_standard_data(
     inventory_file,
     sales_file,
-    hq_file=None
+    transit_file=None,
+    hq_file=None,
 ):
     """
-    从 Excel 文件构建标准数据。
+    从 Excel 文件构建标准数据（四表合一）。
 
     Args:
-        inventory_file: 库存表文件对象
-        sales_file: 销售表文件对象
+        inventory_file: 本地库存表文件对象
+        sales_file: 近期销售表文件对象
+        transit_file: 在途库存表文件对象（未发货），可选
         hq_file: 总部库存表文件对象，可选
 
     Returns:
-        标准 DataFrame
+        (标准 DataFrame, 警告信息列表)
     """
+    from app.data_sources.tplus_openapi_source import query_90day_sales
+
+    warnings = []
+
     sales_df = build_sales_standard_df(sales_file)
     inventory_df = build_inventory_standard_df(inventory_file)
+    transit_df = build_intransit_standard_df(transit_file) if transit_file else None
     hq_df = build_hq_standard_df(hq_file) if hq_file else None
 
+    # 近90天销量从 T+ API 实时获取
+    sales_90_df = None
+    try:
+        sales_90_df = query_90day_sales()
+        import logging
+        logging.getLogger(__name__).warning(
+            "近90天销量查询结果: 行数=%s, 列=%s",
+            len(sales_90_df) if sales_90_df is not None else "None",
+            list(sales_90_df.columns) if sales_90_df is not None else "N/A",
+        )
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("近90天销量查询失败，降级为0: %s", exc)
+        warnings.append("T+ 近90天销量获取失败，本次未计算橙色缺码预警，仅完成红黄绿库存预警。")
+
     # Excel 入口已在各 build_*_df 函数中清洗过，标记 already_cleaned=True
-    return build_standard_data_from_frames(inventory_df, sales_df, hq_df, already_cleaned=True)
+    standard_df = build_standard_data_from_frames(
+        inventory_df, sales_df, hq_df,
+        already_cleaned=True,
+        transit_df=transit_df,
+        sales_90_df=sales_90_df,
+    )
+    return standard_df, warnings

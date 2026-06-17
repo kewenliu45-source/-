@@ -10,3 +10,4 @@ python-dotenv
 pyodbc
 pycryptodome
 itsdangerous
+httpx

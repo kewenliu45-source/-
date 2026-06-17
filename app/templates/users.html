@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>用户管理 - 智能库存预警系统</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        .users-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 16px;
+        }
+        .users-table th,
+        .users-table td {
+            padding: 10px 14px;
+            text-align: left;
+            border-bottom: 1px solid var(--border, #e2e8f0);
+            font-size: 14px;
+        }
+        .users-table th {
+            font-weight: 600;
+            color: var(--text-secondary, #64748b);
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .role-badge {
+            display: inline-block;
+            padding: 2px 10px;
+            border-radius: 9999px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .role-badge.admin {
+            background: #dbeafe;
+            color: #1d4ed8;
+        }
+        .role-badge.user {
+            background: #f1f5f9;
+            color: #475569;
+        }
+        .status-active {
+            color: #16a34a;
+        }
+        .status-inactive {
+            color: #dc2626;
+        }
+        .add-user-form {
+            display: flex;
+            gap: 12px;
+            align-items: flex-end;
+            margin-top: 24px;
+            padding: 20px;
+            background: #f8fafc;
+            border-radius: 10px;
+            border: 1px solid var(--border, #e2e8f0);
+            flex-wrap: wrap;
+        }
+        .add-user-form label {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text, #1e293b);
+        }
+        .add-user-form input,
+        .add-user-form select {
+            padding: 8px 12px;
+            border: 1px solid var(--border, #e2e8f0);
+            border-radius: 6px;
+            font-size: 14px;
+            outline: none;
+        }
+        .add-user-form input:focus,
+        .add-user-form select:focus {
+            border-color: var(--primary, #2563eb);
+        }
+        .add-user-form .primary-btn {
+            height: 36px;
+            padding: 0 20px;
+            white-space: nowrap;
+        }
+        .success-banner {
+            background: #f0fdf4;
+            color: #16a34a;
+            border: 1px solid #bbf7d0;
+            border-radius: 8px;
+            padding: 10px 14px;
+            font-size: 14px;
+            margin-bottom: 16px;
+        }
+        .error-banner {
+            background: #fef2f2;
+            color: #dc2626;
+            border: 1px solid #fecaca;
+            border-radius: 8px;
+            padding: 10px 14px;
+            font-size: 14px;
+            margin-bottom: 16px;
+        }
+        .action-forms {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .action-forms select {
+            padding: 4px 8px;
+            border: 1px solid var(--border, #e2e8f0);
+            border-radius: 4px;
+            font-size: 12px;
+        }
+        .action-forms input[type="password"] {
+            padding: 4px 8px;
+            border: 1px solid var(--border, #e2e8f0);
+            border-radius: 4px;
+            font-size: 12px;
+            width: 100px;
+        }
+        .action-btn {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+            border: 1px solid var(--border, #e2e8f0);
+            background: #fff;
+            color: var(--text, #1e293b);
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .action-btn:hover {
+            background: #f1f5f9;
+        }
+        .action-btn.danger {
+            color: #dc2626;
+            border-color: #fecaca;
+        }
+        .action-btn.danger:hover {
+            background: #fef2f2;
+        }
+        .action-btn.toggle-off {
+            color: #d97706;
+            border-color: #fde68a;
+        }
+        .action-btn.toggle-off:hover {
+            background: #fffbeb;
+        }
+        .action-btn.toggle-on {
+            color: #16a34a;
+            border-color: #bbf7d0;
+        }
+        .action-btn.toggle-on:hover {
+            background: #f0fdf4;
+        }
+    </style>
+</head>
+<body>
+<div class="layout">
+    <aside class="sidebar">
+        <div class="logo">
+            <span class="logo-mark">库</span>
+            <span>智能库存预警</span>
+        </div>
+
+        <div class="menu-section">数据管理</div>
+        <a class="menu" href="/">
+            <span class="menu-icon">↑</span>
+            上传库存数据
+        </a>
+
+        <div class="menu-section">智能分析</div>
+        <a class="menu" href="/">
+            <span class="menu-icon">!</span>
+            预警结果
+        </a>
+        <a class="menu" href="/">
+            <span class="menu-icon">↔</span>
+            调货建议
+        </a>
+
+        <div class="menu-section">通知中心</div>
+        <a class="menu" href="/">
+            <span class="menu-icon">✉</span>
+            企业微信提醒
+        </a>
+        <a class="menu" href="/">
+            <span class="menu-icon">☰</span>
+            每日汇总
+        </a>
+
+        <div class="menu-section">系统管理</div>
+        <a class="menu active" href="/users">
+            <span class="menu-icon">👤</span>
+            用户管理
+        </a>
+
+        {% if current_user %}
+        <div class="sidebar-user">
+            <div class="user-info">
+                <span class="user-avatar">{{ current_user.username[0]|upper }}</span>
+                <div>
+                    <strong>{{ current_user.username }}</strong>
+                    <small>{% if current_user.role == 'admin' %}管理员{% else %}普通用户{% endif %}</small>
+                </div>
+            </div>
+            <a class="logout-link" href="/logout">退出登录</a>
+        </div>
+        {% endif %}
+    </aside>
+
+    <main class="main upload-main">
+        <header class="topbar upload-hero">
+            <div>
+                <span class="eyebrow">系统管理</span>
+                <h1>用户管理</h1>
+                <p>查看系统用户列表，添加新用户。仅管理员可访问此页面。</p>
+            </div>
+        </header>
+
+        <section class="upload-shell">
+            <div class="upload-panel upload-card">
+                {% if request.query_params.get('ok') %}
+                <div class="success-banner">操作成功：{{ request.query_params.get('ok') }}</div>
+                {% elif request.query_params.get('created') %}
+                <div class="success-banner">用户创建成功。</div>
+                {% endif %}
+
+                {% if error %}
+                <div class="error-banner">{{ error }}</div>
+                {% endif %}
+
+                <div class="panel-title">
+                    <span class="eyebrow">用户列表</span>
+                    <h2>当前共有 {{ users|length }} 个用户</h2>
+                </div>
+
+                <table class="users-table">
+                    <thead>
+                        <tr>
+                            <th>用户名</th>
+                            <th>角色</th>
+                            <th>状态</th>
+                            <th>创建时间</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for u in users %}
+                        <tr>
+                            <td><strong>{{ u.username }}</strong></td>
+                            <td>
+                                <span class="role-badge {{ u.role }}">
+                                    {% if u.role == 'admin' %}管理员{% else %}普通用户{% endif %}
+                                </span>
+                            </td>
+                            <td>
+                                {% if u.is_active %}
+                                <span class="status-active">启用</span>
+                                {% else %}
+                                <span class="status-inactive">禁用</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ u.created_at[:10] if u.created_at else '-' }}</td>
+                            <td>
+                                <div class="action-forms">
+                                    {# 修改角色 #}
+                                    <form method="post" action="/users/{{ u.username }}/role" style="display:inline-flex;gap:4px;align-items:center;">
+                                        <select name="role">
+                                            <option value="admin" {% if u.role == 'admin' %}selected{% endif %}>管理员</option>
+                                            <option value="user" {% if u.role == 'user' %}selected{% endif %}>普通用户</option>
+                                        </select>
+                                        <button class="action-btn" type="submit">改角色</button>
+                                    </form>
+
+                                    {# 修改密码 #}
+                                    <form method="post" action="/users/{{ u.username }}/password" style="display:inline-flex;gap:4px;align-items:center;">
+                                        <input type="password" name="password" placeholder="新密码" required minlength="6">
+                                        <button class="action-btn" type="submit">改密码</button>
+                                    </form>
+
+                                    {# 启用/禁用 #}
+                                    {% if u.is_active %}
+                                    <form method="post" action="/users/{{ u.username }}/active" style="display:inline;">
+                                        <input type="hidden" name="is_active" value="0">
+                                        <button class="action-btn toggle-off" type="submit">禁用</button>
+                                    </form>
+                                    {% else %}
+                                    <form method="post" action="/users/{{ u.username }}/active" style="display:inline;">
+                                        <input type="hidden" name="is_active" value="1">
+                                        <button class="action-btn toggle-on" type="submit">启用</button>
+                                    </form>
+                                    {% endif %}
+
+                                    {# 删除 #}
+                                    <form method="post" action="/users/{{ u.username }}/delete" style="display:inline;"
+                                          onsubmit="return confirm('确认删除用户 {{ u.username }}？')">
+                                        <button class="action-btn danger" type="submit">删除</button>
+                                    </form>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+
+                <form class="add-user-form" method="post" action="/users">
+                    <label>
+                        用户名
+                        <input type="text" name="username" required placeholder="用户名"
+                               value="{{ form.username if form is defined and form else '' }}">
+                    </label>
+                    <label>
+                        密码
+                        <input type="password" name="password" required placeholder="至少6位" minlength="6">
+                    </label>
+                    <label>
+                        角色
+                        <select name="role">
+                            {% for r in roles %}
+                            <option value="{{ r }}" {% if form is defined and form and form.role == r %}selected{% endif %}>
+                                {% if r == 'admin' %}管理员{% else %}普通用户{% endif %}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </label>
+                    <button class="primary-btn" type="submit">添加用户</button>
+                </form>
+            </div>
+        </section>
+    </main>
+</div>
+</body>
+</html>

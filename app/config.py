@@ -71,7 +71,7 @@ TPLUS_RECENT_SALES_CACHE_FILE = os.getenv(
 ).strip()
 TPLUS_RECENT_SALES_CACHE_TTL_SECONDS = int(os.getenv("TPLUS_RECENT_SALES_CACHE_TTL_SECONDS", "1800"))
 TPLUS_APP_TICKET_MAX_AGE_SECONDS = int(os.getenv("TPLUS_APP_TICKET_MAX_AGE_SECONDS", "1500"))
-TPLUS_TOKEN_REFRESH_SKEW_SECONDS = int(os.getenv("TPLUS_TOKEN_REFRESH_SKEW_SECONDS", "43200"))
+TPLUS_TOKEN_REFRESH_SKEW_SECONDS = int(os.getenv("TPLUS_TOKEN_REFRESH_SKEW_SECONDS", "600"))
 TPLUS_REQUEST_TIMEOUT = int(os.getenv("TPLUS_REQUEST_TIMEOUT", "20"))
 TPLUS_RETRY_TIMES = int(os.getenv("TPLUS_RETRY_TIMES", "3"))
 TPLUS_QUERY_PAGE_SIZE = int(os.getenv("TPLUS_QUERY_PAGE_SIZE", "200"))
@@ -86,6 +86,34 @@ TPLUS_CURRENT_STOCK_QUERY_ENDPOINT = os.getenv(
 ).strip()
 WARNING_WAREHOUSE_CODE = os.getenv("WARNING_WAREHOUSE_CODE", "006").strip()
 
+# T+ 在途仓配置：从 currentStock/Query 仓库维度拆分在途数据
+# 支持逗号分隔多个值
+TPLUS_TRANSIT_WAREHOUSE_CODES = [
+    item.strip()
+    for item in os.getenv("TPLUS_TRANSIT_WAREHOUSE_CODES", "").split(",")
+    if item.strip()
+]
+TPLUS_TRANSIT_WAREHOUSE_NAMES = [
+    item.strip()
+    for item in os.getenv("TPLUS_TRANSIT_WAREHOUSE_NAMES", "在途仓").split(",")
+    if item.strip()
+]
+
 # 企业微信机器人 Webhook
 # 没有就先留空，不影响系统运行
 WECHAT_WEBHOOK = os.getenv("WECHAT_WEBHOOK", "").strip()
+
+# ========== 登录认证配置 ==========
+# ⚠️ 生产环境必须修改 SESSION_SECRET_KEY，切勿使用默认值！
+SESSION_SECRET_KEY = os.getenv(
+    "SESSION_SECRET_KEY", "dev-secret-key-change-in-production"
+).strip()
+
+# 管理员账号（固定账号，后续可替换为数据库用户表）
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin").strip()
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123").strip()
+
+# 普通用户账号
+USER_USERNAME = os.getenv("USER_USERNAME", "user").strip()
+USER_PASSWORD = os.getenv("USER_PASSWORD", "user123").strip()
+USERS_FILE = os.getenv("USERS_FILE", os.path.join(OUTPUT_DIR, "users.json")).strip()

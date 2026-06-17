@@ -2,6 +2,8 @@ import unittest
 from datetime import date
 from unittest.mock import patch
 
+import pandas as pd
+
 from app.data_sources.tplus_openapi_source import (
     TPlusOpenAPIClient,
     _build_recent_sales_summary_df,
@@ -143,5 +145,67 @@ class TPlusSalesWarehouseTests(unittest.TestCase):
         self.assertEqual(result.iloc[0]["近7天销量"], 6)
 
 
-if __name__ == "__main__":
-    unittest.main()
+class TestColumnNameParameter(unittest.TestCase):
+    """测试 column_name 参数和 query_90day_sales"""
+
+    def test_column_name_default_is_近7天销量(self):
+        """默认列名不变"""
+        rows = [
+            {"存货编码": "SKU001", "尺码": "M", "销售数量": 10, "仓库编码": "006"},
+        ]
+        result = _build_recent_sales_summary_df(rows, days=7)
+        self.assertIn("近7天销量", result.columns)
+        self.assertNotIn("近90天销量", result.columns)
+
+    def test_column_name_custom(self):
+        """自定义列名"""
+        rows = [
+            {"存货编码": "SKU001", "尺码": "M", "销售数量": 100, "仓库编码": "006"},
+        ]
+        result = _build_recent_sales_summary_df(rows, days=90, column_name="近90天销量")
+        self.assertIn("近90天销量", result.columns)
+        self.assertNotIn("近7天销量", result.columns)
+        self.assertEqual(result.iloc[0]["近90天销量"], 100)
+
+    def test_empty_rows_with_custom_column_name(self):
+        """空结果也用自定义列名"""
+        result = _build_recent_sales_summary_df([], days=90, column_name="近90天销量")
+        self.assertIn("近90天销量", result.columns)
+        self.assertNotIn("近7天销量", result.columns)
+        self.assertEqual(len(result), 0)
+
+    def test_90day_summary_has_correct_columns(self):
+        """_build_recent_sales_summary_df(days=90, column_name='近90天销量') 返回正确列"""
+        rows = [
+            {"存货编码": "SKU001", "尺码": "M", "销售数量": 50, "仓库编码": "006"},
+        ]
+        result = _build_recent_sales_summary_df(rows, days=90, column_name="近90天销量")
+
+        self.assertIn("近90天销量", result.columns)
+        self.assertIn("存货编码", result.columns)
+        self.assertIn("尺码", result.columns)
+        # _build_recent_sales_summary_df 仍返回日均销量（基于 90 天）
+        # 但 query_90day_sales() 会在外层去掉它
+        self.assertIn("日均销量", result.columns)
+        self.assertEqual(result.iloc[0]["近90天销量"], 50)
+        self.assertAlmostEqual(result.iloc[0]["日均销量"], 50 / 90, places=2)
+
+    def test_query_90day_sales_drops_日均销量(self):
+        """query_90day_sales 返回的 DataFrame 不含日均销量列"""
+        from app.data_sources.tplus_openapi_source import query_90day_sales
+
+        # mock TPlusOpenAPIClient 使其返回含日均销量的 DataFrame
+        mock_df = pd.DataFrame([
+            {"存货编码": "SKU001", "尺码": "M", "近90天销量": 100, "日均销量": 1.11},
+        ])
+
+        with patch("app.data_sources.tplus_openapi_source.TPlusOpenAPIClient") as MockClient:
+            instance = MockClient.return_value
+            instance.query_recent_sale_delivery_sales.return_value = mock_df
+            result = query_90day_sales()
+
+        self.assertIn("近90天销量", result.columns)
+        self.assertIn("存货编码", result.columns)
+        self.assertIn("尺码", result.columns)
+        self.assertNotIn("日均销量", result.columns)
+        self.assertEqual(list(result.columns), ["存货编码", "尺码", "近90天销量"])

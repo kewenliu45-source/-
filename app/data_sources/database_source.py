@@ -57,11 +57,14 @@ def build_mock_standard_data() -> pd.DataFrame:
             "尺码": "M",
             "近7天销量": 35,
             "日均销量": 5,
+            "近90天销量": 300,
             "仓库编码": "WH001",
             "仓库": "本地仓",
             "当前现存量": 8,
             "当前可用量": 4,
             "总部库存": 60,
+            "在途仓": "",
+            "在途（未发货）": 0,
         },
         {
             "存货编码": "SKU002",
@@ -69,11 +72,14 @@ def build_mock_standard_data() -> pd.DataFrame:
             "尺码": "L",
             "近7天销量": 21,
             "日均销量": 3,
+            "近90天销量": 180,
             "仓库编码": "WH001",
             "仓库": "本地仓",
             "当前现存量": 0,
             "当前可用量": 0,
             "总部库存": 18,
+            "在途仓": "",
+            "在途（未发货）": 0,
         },
         {
             "存货编码": "SKU003",
@@ -81,11 +87,14 @@ def build_mock_standard_data() -> pd.DataFrame:
             "尺码": "XL",
             "近7天销量": 14,
             "日均销量": 2,
+            "近90天销量": 120,
             "仓库编码": "WH002",
             "仓库": "门店仓",
             "当前现存量": 30,
             "当前可用量": 26,
             "总部库存": 10,
+            "在途仓": "",
+            "在途（未发货）": 0,
         },
     ]
 
@@ -96,14 +105,17 @@ def read_sql_dataframe(sql: str, engine) -> pd.DataFrame:
     return pd.read_sql_query(sql, engine)
 
 
-def build_standard_data_from_database() -> pd.DataFrame:
+def build_standard_data_from_database(
+    hq_df: pd.DataFrame | None = None,
+    transit_df: pd.DataFrame | None = None,
+) -> pd.DataFrame:
     if DB_TYPE == "mock":
         return build_mock_standard_data()
 
     if DB_TYPE in {"tplus", "openapi", "chanjet"}:
         from app.data_sources.tplus_openapi_source import build_standard_data_from_tplus_openapi
 
-        return build_standard_data_from_tplus_openapi()
+        return build_standard_data_from_tplus_openapi(hq_df=hq_df, transit_df=transit_df)
 
     try:
         from sqlalchemy import create_engine, text
@@ -165,5 +177,4 @@ def build_standard_data_from_database() -> pd.DataFrame:
     hq_df = read_sql_dataframe(hq_sql, engine)
 
     return build_standard_data_from_frames(inventory_df, sales_df, hq_df)
-
 

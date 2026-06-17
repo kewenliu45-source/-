@@ -1,8 +1,9 @@
-import logging
+﻿import logging
 import os
+import time
 
 from fastapi import APIRouter, UploadFile, File, Request
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, StreamingResponse, FileResponse
 from fastapi.templating import Jinja2Templates
 
 from app.config import BASE_DIR, DB_TYPE, OUTPUT_DIR
@@ -14,6 +15,9 @@ from app.services.warning_service import analyze_standard_data
 
 router = APIRouter()
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "app", "templates"))
+
+# 最近一次分析结果的文件路径（模块级变量）
+_latest_result_file: str | None = None
 
 
 def get_user_facing_error(exc: Exception) -> str:
@@ -35,7 +39,7 @@ def get_user_facing_error(exc: Exception) -> str:
     return message
 
 
-def build_result_context(result_df, data_source_name: str):
+def build_result_context(result_df, data_source_name: str, warnings=None, output_filename=""):
     records = result_df.to_dict(orient="records")
     transfer_df = result_df[result_df["建议调货量"] > 0].copy()
     transfer_columns = [
@@ -50,12 +54,15 @@ def build_result_context(result_df, data_source_name: str):
         "可售天数",
         "建议调货量",
         "总部可调数量",
+        "在途仓",
+        "在途（未发货）",
         "调货建议",
     ]
     transfer_columns = [column for column in transfer_columns if column in transfer_df.columns]
     transfer_records = transfer_df[transfer_columns].to_dict(orient="records")
 
     red_count = int((result_df["预警状态"] == "红色预警").sum())
+    orange_count = int((result_df["预警状态"] == "橙色缺码").sum())
     yellow_count = int((result_df["预警状态"] == "黄色预警").sum())
     normal_count = int((result_df["预警状态"] == "正常").sum())
 
@@ -65,6 +72,7 @@ def build_result_context(result_df, data_source_name: str):
     summary = {
         "total": len(result_df),
         "red_count": red_count,
+        "orange_count": orange_count,
         "yellow_count": yellow_count,
         "normal_count": normal_count,
         "suggest_total": suggest_total,
@@ -78,11 +86,13 @@ def build_result_context(result_df, data_source_name: str):
         "transfer_records": transfer_records,
         "summary": summary,
         "red_count": red_count,
+        "orange_count": orange_count,
         "yellow_count": yellow_count,
         "normal_count": normal_count,
         "suggest_total": suggest_total,
         "hq_total": hq_total,
-        "output_filename": "",
+        "output_filename": output_filename,
+        "warnings": warnings or [],
     }
 
 
@@ -96,7 +106,78 @@ def get_database_data_source_name() -> str:
     return "客户数据库"
 
 
-def render_analysis_result(request: Request, standard_df, data_source_name: str):
+def _save_result_excel(result_df, filepath: str):
+    """保存预警结果为带颜色的 Excel 文件。"""
+    from openpyxl import Workbook
+    from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
+
+    # 预警状态对应的颜色（行背景色）
+    STATUS_COLORS = {
+        "红色预警": "FCA5A5",    # 浅红
+        "橙色缺码": "FDBA74",    # 浅橙
+        "黄色预警": "FDE68A",    # 浅黄
+        "正常":     "BBF7D0",    # 浅绿
+    }
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "预警结果"
+
+    # 写表头
+    columns = list(result_df.columns)
+    header_fill = PatternFill(start_color="374151", end_color="374151", fill_type="solid")
+    header_font = Font(color="FFFFFF", bold=True, size=11)
+    thin_border = Border(
+        left=Side(style="thin", color="D1D5DB"),
+        right=Side(style="thin", color="D1D5DB"),
+        top=Side(style="thin", color="D1D5DB"),
+        bottom=Side(style="thin", color="D1D5DB"),
+    )
+
+    for col_idx, col_name in enumerate(columns, 1):
+        cell = ws.cell(row=1, column=col_idx, value=col_name)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    # 找到预警状态列的索引
+    status_col_idx = columns.index("预警状态") if "预警状态" in columns else -1
+
+    # 写数据行
+    for row_idx, row in enumerate(result_df.itertuples(index=False), 2):
+        status = row[status_col_idx] if status_col_idx >= 0 else ""
+        row_color = STATUS_COLORS.get(str(status).strip(), "")
+        row_fill = PatternFill(start_color=row_color, end_color=row_color, fill_type="solid") if row_color else None
+
+        for col_idx, value in enumerate(row, 1):
+            cell = ws.cell(row=row_idx, column=col_idx, value=value)
+            if row_fill:
+                cell.fill = row_fill
+            cell.alignment = Alignment(vertical="center")
+            cell.border = thin_border
+
+    # 表头也加边框
+    for col_idx in range(1, len(columns) + 1):
+        ws.cell(row=1, column=col_idx).border = thin_border
+
+    # 自动调整列宽（取前100行的最大宽度）
+    for col_idx, col_name in enumerate(columns, 1):
+        max_len = len(str(col_name))
+        for row_idx in range(2, min(102, ws.max_row + 1)):
+            cell_val = ws.cell(row=row_idx, column=col_idx).value
+            if cell_val:
+                max_len = max(max_len, len(str(cell_val)))
+        ws.column_dimensions[ws.cell(row=1, column=col_idx).column_letter].width = min(max_len + 4, 40)
+
+    # 冻结首行
+    ws.freeze_panes = "A2"
+
+    wb.save(filepath)
+
+
+def render_analysis_result(request: Request, standard_df, data_source_name: str, warnings=None):
+    global _latest_result_file
+
     result = analyze_standard_data(standard_df)
 
     if isinstance(result, tuple):
@@ -104,10 +185,34 @@ def render_analysis_result(request: Request, standard_df, data_source_name: str)
     else:
         result_df = result
 
+    # 保存分析结果为 Excel 文件，供下载（带预警颜色）
+    try:
+        filename = f"预警结果_{time.strftime('%Y%m%d_%H%M%S')}.xlsx"
+        filepath = os.path.join(OUTPUT_DIR, filename)
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+        _save_result_excel(result_df, filepath)
+        _latest_result_file = filepath
+    except Exception as exc:
+        logger.warning("保存预警结果文件失败: %s", exc)
+        filename = ""
+
     return templates.TemplateResponse(
         request=request,
         name="result.html",
-        context=build_result_context(result_df, data_source_name),
+        context=build_result_context(result_df, data_source_name, warnings=warnings, output_filename=filename),
+    )
+
+
+@router.get("/download/{filename}")
+async def download_result_file(filename: str):
+    """下载分析结果 Excel 文件"""
+    filepath = os.path.join(OUTPUT_DIR, filename)
+    if not os.path.exists(filepath):
+        return HTMLResponse(content="文件不存在，请重新分析", status_code=404)
+    return FileResponse(
+        path=filepath,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename=filename,
     )
 
 
@@ -116,16 +221,18 @@ async def upload_files(
     request: Request,
     inventory_file: UploadFile = File(...),
     sales_file: UploadFile = File(...),
-    hq_file: UploadFile | None = File(None)
+    transit_file: UploadFile = File(...),
+    hq_file: UploadFile = File(...),
 ):
     try:
-        standard_df = build_standard_data(
+        standard_df, warnings = build_standard_data(
             inventory_file.file,
             sales_file.file,
-            hq_file.file if hq_file else None
+            transit_file.file if transit_file else None,
+            hq_file.file if hq_file else None,
         )
 
-        return render_analysis_result(request, standard_df, "Excel 上传")
+        return render_analysis_result(request, standard_df, "Excel 上传", warnings=warnings)
 
     except Exception as exc:
         logger.exception("请求处理失败")
@@ -142,26 +249,26 @@ async def upload_files(
 @router.post("/database-analysis", response_class=HTMLResponse)
 async def analyze_from_database(
     request: Request,
-    hq_file: UploadFile | None = File(None)
+    hq_file: UploadFile | None = File(None),
+    transit_file: UploadFile | None = File(None),
 ):
     try:
-        from app.data_sources.excel_source import build_hq_standard_df
+        from app.data_sources.excel_source import build_hq_standard_df, build_intransit_standard_df
 
-        # 从数据库获取库存和销售数据
-        standard_df = build_standard_data_from_database()
-
-        # 如果上传了总部库存表，合并到结果中
+        hq_df = None
         if hq_file:
             hq_df = build_hq_standard_df(hq_file.file)
-            if not hq_df.empty:
-                # 按存货编码+尺码合并总部库存
-                standard_df = standard_df.drop(columns=["总部库存"], errors="ignore")
-                standard_df = standard_df.merge(
-                    hq_df,
-                    on=["存货编码", "尺码"],
-                    how="left"
-                )
-                standard_df["总部库存"] = standard_df["总部库存"].fillna(0)
+            if hq_df.empty:
+                hq_df = None
+
+        transit_df = None
+        if transit_file:
+            transit_df = build_intransit_standard_df(transit_file.file)
+            if transit_df.empty:
+                transit_df = None
+
+        # 从数据库获取库存和销售数据（T+ 模式内部已走 build_standard_data_from_frames）
+        standard_df = build_standard_data_from_database(hq_df=hq_df, transit_df=transit_df)
 
         data_source_name = get_database_data_source_name()
 
@@ -420,3 +527,4 @@ async def export_inventory_table():
     except Exception as exc:
         logger.exception("导出库存表失败")
         return HTMLResponse(content=f"导出失败: {str(exc)}", status_code=500)
+

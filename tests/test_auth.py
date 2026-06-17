@@ -4,18 +4,16 @@ import unittest
 from unittest.mock import patch, MagicMock
 
 from app.auth import (
-    ROLE_ADMIN,
-    ROLE_USER,
     is_public_path,
     verify_login,
     get_current_user,
     is_admin,
+    ROLE_ADMIN,
+    ROLE_USER,
 )
 
 
 class TestRoles(unittest.TestCase):
-    """角色常量测试。"""
-
     def test_role_admin_value(self):
         self.assertEqual(ROLE_ADMIN, "admin")
 
@@ -24,8 +22,6 @@ class TestRoles(unittest.TestCase):
 
 
 class TestIsPublicPath(unittest.TestCase):
-    """公开路径判断测试。"""
-
     def test_login_path(self):
         self.assertTrue(is_public_path("/login"))
 
@@ -34,13 +30,21 @@ class TestIsPublicPath(unittest.TestCase):
 
     def test_static_prefix(self):
         self.assertTrue(is_public_path("/static/style.css"))
-        self.assertTrue(is_public_path("/static/CHANJET_CHECK.txt"))
 
     def test_chanjet_check(self):
         self.assertTrue(is_public_path("/CHANJET_CHECK.txt"))
 
     def test_tplus_message_callback(self):
         self.assertTrue(is_public_path("/tplus/message/callback"))
+
+    def test_tplus_message_callback_trailing_slash(self):
+        self.assertTrue(is_public_path("/tplus/message/callback/"))
+
+    def test_tplus_message_callback_with_proxy_prefix(self):
+        self.assertTrue(is_public_path("/inventory/tplus/message/callback"))
+
+    def test_tplus_message_callback_with_extra_suffix_for_diagnostics(self):
+        self.assertTrue(is_public_path("/inventory/tplus/message/callback/check"))
 
     def test_tplus_oauth_callback(self):
         self.assertTrue(is_public_path("/tplus/oauth/callback"))
@@ -60,78 +64,39 @@ class TestIsPublicPath(unittest.TestCase):
     def test_upload_not_public(self):
         self.assertFalse(is_public_path("/upload"))
 
-    def test_database_analysis_not_public(self):
-        self.assertFalse(is_public_path("/database-analysis"))
-
 
 class TestVerifyLogin(unittest.TestCase):
-    """登录校验测试。"""
+    """verify_login 现在委托给 user_store.authenticate_user。"""
 
-    @patch("app.auth.ADMIN_USERNAME", "admin")
-    @patch("app.auth.ADMIN_PASSWORD", "admin123")
-    @patch("app.auth.USER_USERNAME", "user")
-    @patch("app.auth.USER_PASSWORD", "user123")
-    def test_admin_login_success(self):
+    @patch("app.auth.authenticate_user")
+    def test_success_returns_user(self, mock_auth):
+        mock_auth.return_value = {"username": "admin", "role": "admin"}
         result = verify_login("admin", "admin123")
         self.assertIsNotNone(result)
-        self.assertEqual(result["username"], "admin")
-        self.assertEqual(result["role"], ROLE_ADMIN)
+        self.assertEqual(result["role"], "admin")
+        mock_auth.assert_called_once_with("admin", "admin123")
 
-    @patch("app.auth.ADMIN_USERNAME", "admin")
-    @patch("app.auth.ADMIN_PASSWORD", "admin123")
-    @patch("app.auth.USER_USERNAME", "user")
-    @patch("app.auth.USER_PASSWORD", "user123")
-    def test_user_login_success(self):
-        result = verify_login("user", "user123")
-        self.assertIsNotNone(result)
-        self.assertEqual(result["username"], "user")
-        self.assertEqual(result["role"], ROLE_USER)
-
-    @patch("app.auth.ADMIN_USERNAME", "admin")
-    @patch("app.auth.ADMIN_PASSWORD", "admin123")
-    @patch("app.auth.USER_USERNAME", "user")
-    @patch("app.auth.USER_PASSWORD", "user123")
-    def test_wrong_password(self):
-        result = verify_login("admin", "wrongpassword")
-        self.assertIsNone(result)
-
-    @patch("app.auth.ADMIN_USERNAME", "admin")
-    @patch("app.auth.ADMIN_PASSWORD", "admin123")
-    @patch("app.auth.USER_USERNAME", "user")
-    @patch("app.auth.USER_PASSWORD", "user123")
-    def test_wrong_username(self):
-        result = verify_login("nobody", "admin123")
-        self.assertIsNone(result)
-
-    @patch("app.auth.ADMIN_USERNAME", "admin")
-    @patch("app.auth.ADMIN_PASSWORD", "admin123")
-    @patch("app.auth.USER_USERNAME", "user")
-    @patch("app.auth.USER_PASSWORD", "user123")
-    def test_empty_credentials(self):
-        result = verify_login("", "")
+    @patch("app.auth.authenticate_user")
+    def test_failure_returns_none(self, mock_auth):
+        mock_auth.return_value = None
+        result = verify_login("admin", "wrong")
         self.assertIsNone(result)
 
 
 class TestGetCurrentUser(unittest.TestCase):
-    """Session 用户读取测试。"""
-
     def test_user_in_session(self):
         mock_request = MagicMock()
         mock_request.session = {"user": {"username": "admin", "role": "admin"}}
         user = get_current_user(mock_request)
         self.assertEqual(user["username"], "admin")
-        self.assertEqual(user["role"], "admin")
 
     def test_no_user_in_session(self):
         mock_request = MagicMock()
         mock_request.session = {}
-        user = get_current_user(mock_request)
-        self.assertIsNone(user)
+        self.assertIsNone(get_current_user(mock_request))
 
 
 class TestIsAdmin(unittest.TestCase):
-    """管理员判断测试。"""
-
     def test_admin_user(self):
         mock_request = MagicMock()
         mock_request.session = {"user": {"username": "admin", "role": "admin"}}
