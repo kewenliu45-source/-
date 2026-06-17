@@ -139,32 +139,36 @@
 
                 <form class="database-form" action="/database-analysis" method="post" enctype="multipart/form-data">
                     <div class="database-source">
-                        <div>
+                        <div class="database-source-header">
                             <span class="eyebrow">客户数据库</span>
                             <h3>从数据库直接读取库存数据</h3>
                             <p>未连接客户 VPN 时，系统默认使用模拟数据库数据验证流程；到客户现场后切换数据库配置即可。</p>
                         </div>
-                        <label class="upload-box small">
-                            <input type="file" name="hq_file" accept=".xlsx,.xls">
-                            <span class="upload-content">
-                                <strong>总部库存表（可选）</strong>
-                                <small>如需调货建议，请上传总部库存二维表</small>
-                                <em data-empty="未选择文件">未选择文件</em>
-                            </span>
-                        </label>
-                        <label class="upload-box small">
-                            <input type="file" name="transit_file" accept=".xlsx,.xls">
-                            <span class="upload-content">
-                                <strong>在途库存表（可选）</strong>
-                                <small>上传在途（未发货）库存表</small>
-                                <em data-empty="未选择文件">未选择文件</em>
-                            </span>
-                        </label>
-                        <div class="export-actions">
-                            <a class="export-btn" href="/export/sales" target="_blank">📥 导出近7天销售表</a>
-                            <a class="export-btn" href="/export/inventory" target="_blank">📥 导出库存表</a>
+                        <div class="database-upload-grid">
+                            <label class="upload-box small">
+                                <input type="file" name="hq_file" accept=".xlsx,.xls">
+                                <span class="upload-content">
+                                    <strong>总部库存表（可选）</strong>
+                                    <small>如需调货建议，请上传总部库存二维表</small>
+                                    <em data-empty="未选择文件">未选择文件</em>
+                                </span>
+                            </label>
+                            <label class="upload-box small">
+                                <input type="file" name="transit_file" accept=".xlsx,.xls">
+                                <span class="upload-content">
+                                    <strong>在途库存表（可选）</strong>
+                                    <small>上传在途（未发货）库存表</small>
+                                    <em data-empty="未选择文件">未选择文件</em>
+                                </span>
+                            </label>
                         </div>
-                        <button class="secondary-btn" type="submit">从数据库分析</button>
+                        <div class="database-actions">
+                            <div class="export-actions">
+                                <a class="export-btn" href="/export/sales" target="_blank">导出近7天销售表</a>
+                                <a class="export-btn" href="/export/inventory" target="_blank">导出库存表</a>
+                            </div>
+                            <button class="secondary-btn" type="submit" id="db-submit-btn">从数据库分析</button>
+                        </div>
                     </div>
                 </form>
             </div>
@@ -186,6 +190,49 @@
                     <p>如需校验格式，可先上传 uploads 目录内的示例表。</p>
                 </div>
             </aside>
+        </section>
+
+        <!-- 高库存预警入口 -->
+        <section class="upload-shell high-stock-section">
+            <div class="upload-panel upload-card">
+                <div class="panel-title">
+                    <span class="eyebrow">高库存预警</span>
+                    <h2>高库存 / 滞销风险分析</h2>
+                    <p>上传本地库存表和近 1 年销售表，系统将按 SKU+尺码 计算预计消化库存天数，识别高库存 / 滞销风险。消化天数超过 90 天视为高库存预警。</p>
+                </div>
+
+                <form class="upload-form high-stock-form" action="/high-stock-analysis" method="post" enctype="multipart/form-data">
+                    <label class="upload-box">
+                        <input type="file" name="inventory_file" accept=".xlsx,.xls" required>
+                        <span class="upload-step">01</span>
+                        <span class="upload-icon">📦</span>
+                        <span class="upload-content">
+                            <strong>本地库存表</strong>
+                            <small>含已发货在途，系统自动筛选 006 仓库</small>
+                            <em data-empty="未选择文件">未选择文件</em>
+                        </span>
+                    </label>
+
+                    <label class="upload-box">
+                        <input type="file" name="annual_sales_file" accept=".xlsx,.xls" required>
+                        <span class="upload-step">02</span>
+                        <span class="upload-icon">📊</span>
+                        <span class="upload-content">
+                            <strong>近 1 年销售表</strong>
+                            <small>用于计算年日均销量和预计消化库存天数</small>
+                            <em data-empty="未选择文件">未选择文件</em>
+                        </span>
+                    </label>
+
+                    <div class="upload-actions">
+                        <div class="upload-note">
+                            <strong>分析输出</strong>
+                            <span>高库存预警、预计消化库存天数、年日均销量</span>
+                        </div>
+                        <button class="primary-btn high-stock-btn" type="submit">开始高库存分析</button>
+                    </div>
+                </form>
+            </div>
         </section>
     </main>
 </div>
@@ -209,9 +256,15 @@
     });
 
     document.querySelector('.database-form').addEventListener('submit', (event) => {
-        const button = event.currentTarget.querySelector('.secondary-btn');
+        const button = document.getElementById('db-submit-btn');
         button.disabled = true;
-        button.textContent = '正在读取...';
+        button.textContent = '正在分析，请稍候（预计约30秒）...';
+    });
+
+    document.querySelector('.high-stock-form').addEventListener('submit', (event) => {
+        const button = event.currentTarget.querySelector('.high-stock-btn');
+        button.disabled = true;
+        button.textContent = '正在分析...';
     });
 </script>
 </body>

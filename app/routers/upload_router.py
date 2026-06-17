@@ -11,7 +11,7 @@ from app.config import BASE_DIR, DB_TYPE, OUTPUT_DIR
 logger = logging.getLogger(__name__)
 from app.data_sources.database_source import build_standard_data_from_database
 from app.data_sources.excel_source import build_standard_data
-from app.services.warning_service import analyze_standard_data
+from app.services.warning_service import analyze_standard_data, analyze_high_stock_data
 
 router = APIRouter()
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "app", "templates"))
@@ -106,7 +106,7 @@ def get_database_data_source_name() -> str:
     return "客户数据库"
 
 
-def _save_result_excel(result_df, filepath: str):
+def _save_result_excel(result_df, filepath: str, sheet_name: str = "预警结果", extra_colors: dict | None = None):
     """保存预警结果为带颜色的 Excel 文件。"""
     from openpyxl import Workbook
     from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
@@ -117,11 +117,14 @@ def _save_result_excel(result_df, filepath: str):
         "橙色缺码": "FDBA74",    # 浅橙
         "黄色预警": "FDE68A",    # 浅黄
         "正常":     "BBF7D0",    # 浅绿
+        "高库存预警": "E9D5FF",  # 浅紫
     }
+    if extra_colors:
+        STATUS_COLORS.update(extra_colors)
 
     wb = Workbook()
     ws = wb.active
-    ws.title = "预警结果"
+    ws.title = sheet_name
 
     # 写表头
     columns = list(result_df.columns)
@@ -201,6 +204,86 @@ def render_analysis_result(request: Request, standard_df, data_source_name: str,
         name="result.html",
         context=build_result_context(result_df, data_source_name, warnings=warnings, output_filename=filename),
     )
+
+
+def build_high_stock_context(result_df, warnings=None, output_filename=""):
+    """构建高库存预警结果的模板 context。"""
+    records = result_df.to_dict(orient="records")
+
+    high_stock_count = int((result_df["预警状态"] == "高库存预警").sum())
+    normal_count = int((result_df["预警状态"] == "正常").sum())
+    high_stock_total_qty = int(
+        result_df.loc[result_df["预警状态"] == "高库存预警", "当前可用量"].sum()
+    )
+
+    summary = {
+        "total": len(result_df),
+        "high_stock_count": high_stock_count,
+        "normal_count": normal_count,
+        "high_stock_total_qty": high_stock_total_qty,
+        "data_source_name": "高库存 Excel 上传",
+    }
+
+    return {
+        "records": records,
+        "preview_data": records,
+        "summary": summary,
+        "output_filename": output_filename,
+        "warnings": warnings or [],
+    }
+
+
+def render_high_stock_result(request: Request, result_df, warnings=None):
+    """渲染高库存预警结果页面。"""
+    global _latest_result_file
+
+    try:
+        filename = f"高库存预警结果_{time.strftime('%Y%m%d_%H%M%S')}.xlsx"
+        filepath = os.path.join(OUTPUT_DIR, filename)
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+        _save_result_excel(result_df, filepath, sheet_name="高库存预警结果")
+        _latest_result_file = filepath
+    except Exception as exc:
+        logger.warning("保存高库存预警结果文件失败: %s", exc)
+        filename = ""
+
+    return templates.TemplateResponse(
+        request=request,
+        name="high_stock_result.html",
+        context=build_high_stock_context(result_df, warnings=warnings, output_filename=filename),
+    )
+
+
+@router.post("/high-stock-analysis", response_class=HTMLResponse)
+async def analyze_high_stock(
+    request: Request,
+    inventory_file: UploadFile = File(...),
+    annual_sales_file: UploadFile = File(...),
+):
+    """高库存预警分析入口。"""
+    try:
+        from app.data_sources.excel_source import (
+            build_inventory_standard_df,
+            build_annual_sales_standard_df,
+        )
+
+        inventory_df = build_inventory_standard_df(inventory_file.file)
+        annual_sales_df = build_annual_sales_standard_df(annual_sales_file.file)
+
+        result_df = analyze_high_stock_data(inventory_df, annual_sales_df)
+
+        return render_high_stock_result(request, result_df)
+
+    except Exception as exc:
+        logger.exception("高库存分析请求处理失败")
+
+        return templates.TemplateResponse(
+            request=request,
+            name="error.html",
+            context={
+                "error": get_user_facing_error(exc)
+            }
+        )
 
 
 @router.get("/download/{filename}")

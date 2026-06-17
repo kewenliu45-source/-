@@ -64,6 +64,11 @@ SALE_DELIVERY_LIST_BODY = {
 }
 
 
+def _tplus_progress_print(message: str, level: str = "info") -> None:
+    """输出到终端。"""
+    print(message)
+
+
 class TPlusOpenAPIClient:
     def __init__(self):
         if not TPLUS_API_BASE_URL:
@@ -261,10 +266,10 @@ class TPlusOpenAPIClient:
         if not force_refresh:
             cached_sales_df = _read_recent_sales_cache(cache_key)
             if cached_sales_df is not None:
-                print(f"[T+]   {column_name}命中缓存，{len(cached_sales_df)} 条")
+                _tplus_progress_print(f"[T+]   {column_name}命中缓存，{len(cached_sales_df)} 条", "success")
                 return cached_sales_df
 
-        print(f"[T+]   {column_name}缓存未命中，开始查询销货单列表...")
+        _tplus_progress_print(f"[T+]   {column_name}缓存未命中，开始查询销货单列表...")
         first_page = self._find_sale_delivery_list_response(
             page_index=1,
             page_size=page_size,
@@ -322,7 +327,7 @@ class TPlusOpenAPIClient:
             scan_page(page_index)
 
         candidate_vouchers = list(candidate_vouchers_by_key.values())
-        print(f"[T+]   {column_name}找到 {len(candidate_vouchers)} 张销货单，开始查询明细...")
+        _tplus_progress_print(f"[T+]   {column_name}找到 {len(candidate_vouchers)} 张销货单，开始查询明细...")
 
         rows: list[dict[str, Any]] = []
         worker_count = max(1, min(max_detail_workers, len(candidate_vouchers) or 1))
@@ -340,7 +345,7 @@ class TPlusOpenAPIClient:
             for future in as_completed(futures):
                 done_count += 1
                 if done_count % 10 == 0 or done_count == len(candidate_vouchers):
-                    print(f"[T+]   {column_name}明细进度: {done_count}/{len(candidate_vouchers)}")
+                    _tplus_progress_print(f"[T+]   {column_name}明细进度: {done_count}/{len(candidate_vouchers)}")
                 try:
                     detail_response = future.result()
                 except Exception as exc:
@@ -444,11 +449,11 @@ class TPlusOpenAPIClient:
                     new_records.append(rec)
 
             records.extend(new_records)
-            print(f"[T+]   分页查询 {endpoint} 第{page_index}页: +{len(new_records)} 条(去重), 累计 {len(records)} 条")
+            _tplus_progress_print(f"[T+]   分页查询 {endpoint} 第{page_index}页: +{len(new_records)} 条(去重), 累计 {len(records)} 条")
 
             # 如果本页全部是重复数据，说明已拿完或 API 不支持分页
             if not new_records:
-                print(f"[T+]   第{page_index}页全部重复，停止翻页")
+                _tplus_progress_print(f"[T+]   第{page_index}页全部重复，停止翻页", "warning")
                 break
 
             total_count = self._extract_total_count(response)
@@ -786,10 +791,10 @@ def build_standard_data_from_tplus_openapi(
     client = TPlusOpenAPIClient()
 
     # 预获取 token，避免 4 个并行线程各自刷新
-    print("[T+] 正在获取访问令牌...")
+    _tplus_progress_print("[T+] 正在获取访问令牌...")
     try:
         client.get_access_token()
-        print("[T+] [OK] 令牌获取成功")
+        _tplus_progress_print("[T+] [OK] 令牌获取成功", "success")
     except Exception as exc:
         logging.warning("预获取 T+ token 失败，将在各线程中重试: %s", exc)
 
@@ -800,36 +805,38 @@ def build_standard_data_from_tplus_openapi(
 
     def fetch_inventory():
         nonlocal inventory_records
-        print("[T+] 开始查询存货档案...")
+        _tplus_progress_print("[T+] 开始查询存货档案...")
         inventory_records = client.query_inventory()
-        print(f"[T+] [OK] 存货档案: {len(inventory_records)} 条")
+        _tplus_progress_print(f"[T+] [OK] 存货档案: {len(inventory_records)} 条", "success")
 
     def fetch_stock():
         nonlocal stock_records
-        print("[T+] 开始查询当前库存...")
+        _tplus_progress_print("[T+] 开始查询当前库存...")
         stock_records = client.query_current_stock()
-        print(f"[T+] [OK] 当前库存: {len(stock_records)} 条")
+        _tplus_progress_print(f"[T+] [OK] 当前库存: {len(stock_records)} 条", "success")
 
     def fetch_sales_7d():
         nonlocal sales_df
-        print("[T+] 开始查询近7天销量...")
+        _tplus_progress_print("[T+] 开始查询近7天销量...")
         sales_df = client.query_recent_sale_delivery_sales()
-        print(f"[T+] [OK] 近7天销量: {len(sales_df) if sales_df is not None and not sales_df.empty else 0} 条")
+        count = len(sales_df) if sales_df is not None and not sales_df.empty else 0
+        _tplus_progress_print(f"[T+] [OK] 近7天销量: {count} 条", "success")
 
     def fetch_sales_90d():
         nonlocal sales_90_df
-        print("[T+] 开始查询近90天销量...")
+        _tplus_progress_print("[T+] 开始查询近90天销量...")
         try:
             sales_90_df = query_90day_sales()
-            print(f"[T+] [OK] 近90天销量: {len(sales_90_df) if sales_90_df is not None and not sales_90_df.empty else 0} 条")
+            count = len(sales_90_df) if sales_90_df is not None and not sales_90_df.empty else 0
+            _tplus_progress_print(f"[T+] [OK] 近90天销量: {count} 条", "success")
         except Exception as exc:
             logging.warning("近90天销量查询失败，降级为0: %s", exc)
-            print(f"[T+] [FAIL] 近90天销量查询失败: {exc}")
+            _tplus_progress_print(f"[T+] [FAIL] 近90天销量查询失败: {exc}", "warning")
 
-    print("[T+] 并行查询存货/库存/7天销量/90天销量...")
+    _tplus_progress_print("[T+] 并行查询存货/库存/7天销量/90天销量...")
     with ThreadPoolExecutor(max_workers=4) as executor:
         list(executor.map(lambda fn: fn(), [fetch_inventory, fetch_stock, fetch_sales_7d, fetch_sales_90d]))
-    print("[T+] [OK] 全部数据查询完成")
+    _tplus_progress_print("[T+] [OK] 全部数据查询完成", "success")
 
     # 存货档案：所有存货（含库存为0的）
     inventory_master_df = _build_inventory_master_df(inventory_records)
@@ -870,7 +877,7 @@ def build_standard_data_from_tplus_openapi(
     if extra_rows:
         extra_df = pd.DataFrame(extra_rows)
         inventory_master_df = pd.concat([inventory_master_df, extra_df], ignore_index=True)
-        print(f"[T+] 从 currentStock 补入 {len(extra_rows)} 个缺失的 SKU+尺码 组合")
+        _tplus_progress_print(f"[T+] 从 currentStock 补入 {len(extra_rows)} 个缺失的 SKU+尺码 组合")
 
     # 用库存记录中的 Specification↔DynamicPropertyValues 映射修正存货档案的尺码
     size_alias = _build_tplus_size_alias_map(stock_records)

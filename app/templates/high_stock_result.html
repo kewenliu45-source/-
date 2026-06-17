@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>库存分析结果</title>
+    <title>高库存预警分析结果</title>
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -15,12 +15,7 @@
         <a class="menu" href="/">上传库存数据</a>
 
         <div class="menu-section">智能分析</div>
-        <a class="menu active" href="#warning-detail">预警结果</a>
-        <a class="menu" href="#transfer-advice">调货建议</a>
-
-        <div class="menu-section">通知中心</div>
-        <a class="menu" href="/">企业微信提醒</a>
-        <a class="menu" href="/">每日汇总</a>
+        <a class="menu active" href="#warning-detail">高库存预警</a>
 
         <div class="menu-section">系统管理</div>
         <a class="menu" href="/">系统设置</a>
@@ -29,19 +24,14 @@
     <main class="main">
         <header class="topbar">
             <div>
-                <h1>库存分析结果</h1>
-                <p>系统已完成库存风险分析，数据来源：{{ summary.data_source_name }}。可查看预警明细并下载Excel结果</p>
+                <h1>高库存预警分析结果</h1>
+                <p>系统已完成高库存风险分析，数据来源：{{ summary.data_source_name }}。库存消化天数超过 90 天视为高库存。</p>
             </div>
 
             <div class="action-group">
-                <form action="/send-daily-summary" method="post" target="_blank">
-                    <button class="summary-btn" type="submit">发送每日汇总</button>
-                </form>
                 {% if output_filename %}
                 <a class="download-btn" href="/download/{{ output_filename }}">下载Excel</a>
                 {% endif %}
-                <a class="download-btn" href="/export/sales" target="_blank">导出销售表</a>
-                <a class="download-btn" href="/export/inventory" target="_blank">导出库存表</a>
                 <button class="download-btn" id="export-filtered-btn" type="button">导出筛选结果</button>
             </div>
         </header>
@@ -57,43 +47,34 @@
                 <span>数据总数</span>
                 <strong>{{ summary.total }}</strong>
             </div>
-            <div class="stat-card danger">
-                <span>红色预警</span>
-                <strong>{{ summary.red_count }}</strong>
-            </div>
-            <div class="stat-card orange">
-                <span>橙色缺码</span>
-                <strong>{{ summary.orange_count }}</strong>
-            </div>
-            <div class="stat-card warning">
-                <span>黄色预警</span>
-                <strong>{{ summary.yellow_count }}</strong>
+            <div class="stat-card" style="border-left: 4px solid #C084FC;">
+                <span>高库存预警</span>
+                <strong style="color: #C084FC;">{{ summary.high_stock_count }}</strong>
             </div>
             <div class="stat-card success">
                 <span>正常库存</span>
                 <strong>{{ summary.normal_count }}</strong>
             </div>
-            <div class="stat-card primary">
-                <span>建议调货总量</span>
-                <strong>{{ summary.suggest_total }}</strong>
+            <div class="stat-card" style="border-left: 4px solid #C084FC;">
+                <span>高库存总件数</span>
+                <strong style="color: #C084FC;">{{ summary.high_stock_total_qty }}</strong>
             </div>
         </section>
 
         <section class="filter-bar">
             <input type="text" id="filter-keyword" placeholder="搜索SKU / 商品名 / 仓库">
-            <div class="filter-checkboxes">
-                <label class="filter-check red"><input type="checkbox" value="红色预警" checked> 红色预警</label>
-                <label class="filter-check orange"><input type="checkbox" value="橙色缺码" checked> 橙色缺码</label>
-                <label class="filter-check yellow"><input type="checkbox" value="黄色预警" checked> 黄色预警</label>
-                <label class="filter-check green"><input type="checkbox" value="正常" checked> 正常</label>
-            </div>
+            <select id="filter-status">
+                <option>全部预警状态</option>
+                <option>高库存预警</option>
+                <option>正常</option>
+            </select>
             <button type="button" onclick="doFilterTable()">筛选</button>
         </section>
 
         <section class="table-panel" id="warning-detail">
             <div class="panel-title">
-                <h2>预警明细</h2>
-                <p>红色代表已缺货，黄色代表库存不足需要提前调货</p>
+                <h2>高库存预警明细</h2>
+                <p>紫色代表高库存（消化天数 > 90 天），绿色代表正常库存</p>
             </div>
 
             <div class="table-wrap">
@@ -111,9 +92,7 @@
                     <tbody>
                     {% for row in preview_data %}
                         <tr class="
-                            {% if row['预警状态'] == '红色预警' %}row-red{% endif %}
-                            {% if row['预警状态'] == '橙色缺码' %}row-orange{% endif %}
-                            {% if row['预警状态'] == '黄色预警' %}row-yellow{% endif %}
+                            {% if row['预警状态'] == '高库存预警' %}row-high-stock{% endif %}
                             {% if row['预警状态'] == '正常' %}row-green{% endif %}
                         ">
                             {% for value in row.values() %}
@@ -125,41 +104,6 @@
                 </table>
             </div>
         </section>
-
-        <section class="table-panel" id="transfer-advice">
-            <div class="panel-title">
-                <h2>调货建议</h2>
-                <p>只展示建议调货量大于 0 的 SKU，当前库存预警口径仅计算 006 库。</p>
-            </div>
-
-            <div class="table-wrap">
-                {% if transfer_records %}
-                    <table>
-                        <thead>
-                        <tr>
-                            {% for key in transfer_records[0].keys() %}
-                                <th>{{ key }}</th>
-                            {% endfor %}
-                        </tr>
-                        </thead>
-
-                        <tbody>
-                        {% for row in transfer_records %}
-                            <tr class="
-                                {% if '立即' in row['调货建议'] %}row-red{% elif '缺码' in row['调货建议'] %}row-orange{% elif '尽快' in row['调货建议'] %}row-yellow{% endif %}
-                            ">
-                                {% for value in row.values() %}
-                                    <td>{{ value }}</td>
-                                {% endfor %}
-                            </tr>
-                        {% endfor %}
-                        </tbody>
-                    </table>
-                {% else %}
-                    <div class="empty-state">当前没有需要调货的 SKU。</div>
-                {% endif %}
-            </div>
-        </section>
     </main>
 </div>
 
@@ -167,16 +111,9 @@
 // 筛选表格
 function doFilterTable() {
     var keyword = (document.getElementById('filter-keyword').value || '').trim().toLowerCase();
+    var status = document.getElementById('filter-status').value;
     var table = document.querySelector('#warning-detail table');
     if (!table) return;
-
-    // 获取勾选的状态
-    var checkedBoxes = document.querySelectorAll('.filter-checkboxes input[type="checkbox"]:checked');
-    var selectedStatuses = {};
-    for (var i = 0; i < checkedBoxes.length; i++) {
-        selectedStatuses[checkedBoxes[i].value] = true;
-    }
-    var allChecked = checkedBoxes.length === document.querySelectorAll('.filter-checkboxes input[type="checkbox"]').length;
 
     var rows = table.querySelectorAll('tbody tr');
     var headers = table.querySelectorAll('thead th');
@@ -190,10 +127,9 @@ function doFilterTable() {
         var cells = row.querySelectorAll('td');
         var show = true;
 
-        // 状态筛选（未全选时才过滤）
-        if (!allChecked && statusCol >= 0 && statusCol < cells.length) {
-            var rowStatus = cells[statusCol].textContent.trim();
-            if (!selectedStatuses[rowStatus]) {
+        // 状态筛选
+        if (status !== '全部预警状态' && statusCol >= 0 && statusCol < cells.length) {
+            if (cells[statusCol].textContent.trim() !== status) {
                 show = false;
             }
         }
@@ -219,10 +155,10 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
-    // 勾选框自动筛选
-    var boxes = document.querySelectorAll('.filter-checkboxes input[type="checkbox"]');
-    for (var i = 0; i < boxes.length; i++) {
-        boxes[i].addEventListener('change', doFilterTable);
+    // 状态下拉自动筛选
+    var sel = document.getElementById('filter-status');
+    if (sel) {
+        sel.addEventListener('change', doFilterTable);
     }
 
     // 导出筛选结果
@@ -260,7 +196,7 @@ document.addEventListener('DOMContentLoaded', function () {
             var url = URL.createObjectURL(blob);
             var a = document.createElement('a');
             a.href = url;
-            a.download = '预警结果_' + new Date().toISOString().slice(0, 10) + '.csv';
+            a.download = '高库存预警结果_' + new Date().toISOString().slice(0, 10) + '.csv';
             a.click();
             URL.revokeObjectURL(url);
         });

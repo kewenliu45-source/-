@@ -113,6 +113,68 @@ def build_sales_standard_df(sales_file):
     return sales_standard_df
 
 
+# ========= 近1年销售表（高库存预警用）=========
+
+def build_annual_sales_standard_df(annual_sales_file):
+    """解析近1年销售表，输出高库存预警所需的年度销售数据。
+
+    复用现有销售表解析逻辑：自动识别表头、清洗编码/尺码、仓库筛选、聚合。
+
+    Returns:
+        DataFrame 列: 存货编码, 存货, 尺码, 近365天销量, 年日均销量
+    """
+    # 先读取前几行，检测表头位置
+    preview = pd.read_excel(annual_sales_file, header=None, nrows=10)
+
+    # 查找包含 "存货编码" 的行作为表头
+    header_row = 0
+    for i, row in preview.iterrows():
+        row_str = " ".join(str(v) for v in row.values if pd.notna(v))
+        if "存货编码" in row_str:
+            header_row = i
+            break
+
+    # 读取时指定字符串列，避免数字被自动转换
+    df = pd.read_excel(
+        annual_sales_file,
+        header=header_row,
+        dtype={"存货编码": str, "尺码": str, "仓库编码": str},
+    )
+
+    df = clean_columns(df)
+
+    # 填充 NaN 值，避免 groupby 时丢失数据
+    for col in ["存货", "仓库", "销售单位"]:
+        if col in df.columns:
+            df[col] = df[col].fillna("")
+
+    df["存货编码"] = df["存货编码"].apply(clean_code)
+    df["尺码"] = df["尺码"].apply(clean_size)
+
+    df["数量"] = pd.to_numeric(df["数量"], errors="coerce").fillna(0)
+
+    # 按仓库筛选
+    if WARNING_WAREHOUSE_CODE and "仓库编码" in df.columns:
+        df["仓库编码"] = pd.to_numeric(df["仓库编码"], errors="coerce")
+        df = df[df["仓库编码"].notna()]
+        df["仓库编码"] = df["仓库编码"].astype(int).astype(str).str.zfill(3)
+        df = df[df["仓库编码"] == WARNING_WAREHOUSE_CODE]
+
+    # 只保留有销量
+    df = df[df["数量"] > 0]
+
+    result = (
+        df
+        .groupby(["存货编码", "存货", "尺码"], as_index=False)["数量"]
+        .sum()
+    )
+
+    result = result.rename(columns={"数量": "近365天销量"})
+    result["年日均销量"] = (result["近365天销量"] / 365).round(2)
+
+    return result
+
+
 # ========= 库存表 =========
 
 def build_inventory_standard_df(inventory_file):
