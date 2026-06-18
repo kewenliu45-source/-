@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>正在分析 - 智能库存预警系统</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        .analysis-wait-page {
+            min-height: 100vh;
+            display: grid;
+            place-items: center;
+            padding: 24px;
+            background: #f5f7fa;
+        }
+        .analysis-wait-card {
+            width: min(560px, 100%);
+            padding: 42px;
+            border-radius: 18px;
+            background: #fff;
+            box-shadow: 0 18px 50px rgba(15, 23, 42, 0.1);
+            text-align: center;
+        }
+        .analysis-spinner {
+            width: 52px;
+            height: 52px;
+            margin: 0 auto 24px;
+            border: 5px solid #dbeafe;
+            border-top-color: #2563eb;
+            border-radius: 50%;
+            animation: spin 0.9s linear infinite;
+        }
+        .analysis-wait-card h1 {
+            margin: 0 0 12px;
+            color: #1e293b;
+        }
+        .analysis-wait-card p {
+            color: #64748b;
+            line-height: 1.7;
+        }
+        .analysis-status {
+            margin: 24px 0;
+            padding: 14px 18px;
+            border-radius: 10px;
+            background: #eff6ff;
+            color: #1d4ed8;
+        }
+        .analysis-error {
+            background: #fef2f2;
+            color: #dc2626;
+        }
+        .analysis-actions {
+            margin-top: 18px;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+<main class="analysis-wait-page">
+    <section class="analysis-wait-card">
+        <div class="analysis-spinner" id="analysis-spinner"></div>
+        <h1>正在分析库存数据</h1>
+        <p>任务已在后台运行。即使 cpolar 中途重连，分析也不会停止；完成后本页会自动打开结果。</p>
+        <div class="analysis-status" id="analysis-status">分析任务已提交，正在等待执行</div>
+        <div class="analysis-actions">
+            <a class="download-btn" href="/">返回首页</a>
+        </div>
+    </section>
+</main>
+
+<script>
+    (function () {
+        var taskId = {{ task_id | tojson }};
+        var statusBox = document.getElementById('analysis-status');
+        var spinner = document.getElementById('analysis-spinner');
+        var stopped = false;
+
+        function showFailure(message) {
+            stopped = true;
+            spinner.style.display = 'none';
+            statusBox.classList.add('analysis-error');
+            statusBox.textContent = message || '分析失败，请返回首页后重试';
+        }
+
+        function poll() {
+            if (stopped) return;
+
+            fetch('/analysis-tasks/' + encodeURIComponent(taskId), {
+                credentials: 'same-origin',
+                cache: 'no-store'
+            })
+                .then(function (response) {
+                    if (!response.ok) {
+                        throw new Error('无法获取分析状态');
+                    }
+                    return response.json();
+                })
+                .then(function (data) {
+                    statusBox.textContent = data.message || '正在分析';
+                    if (data.status === 'succeeded' && data.result_url) {
+                        window.location.replace(data.result_url);
+                        return;
+                    }
+                    if (data.status === 'failed') {
+                        showFailure(data.message);
+                        return;
+                    }
+                    window.setTimeout(poll, 2000);
+                })
+                .catch(function () {
+                    statusBox.textContent = '网络暂时中断，正在重新连接分析任务…';
+                    window.setTimeout(poll, 3000);
+                });
+        }
+
+        poll();
+    })();
+</script>
+</body>
+</html>

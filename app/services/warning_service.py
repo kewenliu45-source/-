@@ -212,7 +212,7 @@ def analyze_high_stock_data(
     result["年日均销量"] = (result["近365天销量"] / 365).round(2)
 
     # 计算预计消化库存天数
-    result["预计消化库存天数"] = 999
+    result["预计消化库存天数"] = 999.0
     has_sales = result["年日均销量"] > 0
     result.loc[has_sales, "预计消化库存天数"] = (
         result.loc[has_sales, "当前可用量"] / result.loc[has_sales, "年日均销量"]

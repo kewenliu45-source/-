@@ -249,22 +249,196 @@
         });
     });
 
-    document.querySelector('.upload-form').addEventListener('submit', (event) => {
-        const button = event.currentTarget.querySelector('.primary-btn');
+    // 通用分片上传函数：init → 分片上传 → 启动后台分析 → 跳转轮询页
+    async function submitViaChunkedUpload(form, fileList, startEndpoint, startBody, button, originalText) {
+        const chunkSize = 512 * 1024;
+
         button.disabled = true;
-        button.textContent = '正在分析...';
+
+        try {
+            const files = {};
+            fileList.forEach((item) => {
+                if (item.file) files[item.kind] = { name: item.file.name, size: item.file.size };
+            });
+
+            button.textContent = '正在准备上传...';
+            const initResponse = await fetch('/analysis-uploads/init', {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ files: files })
+            });
+            if (!initResponse.ok) {
+                throw new Error('无法创建上传任务');
+            }
+            const upload = await initResponse.json();
+
+            async function uploadFile(kind, file) {
+                if (!file) return;
+                const totalChunks = Math.ceil(file.size / chunkSize);
+
+                for (let index = 0; index < totalChunks; index++) {
+                    const start = index * chunkSize;
+                    const end = Math.min(start + chunkSize, file.size);
+                    const percent = Math.round((end / file.size) * 100);
+                    button.textContent = '正在上传 ' + file.name + ' (' + percent + '%)...';
+
+                    const chunkResponse = await fetch(
+                        '/analysis-uploads/' + encodeURIComponent(upload.upload_id) +
+                        '/' + kind + '/chunks/' + index,
+                        {
+                            method: 'POST',
+                            credentials: 'same-origin',
+                            headers: { 'Content-Type': 'application/octet-stream' },
+                            body: file.slice(start, end)
+                        }
+                    );
+                    if (!chunkResponse.ok) {
+                        const detail = await chunkResponse.json().catch(() => ({}));
+                        throw new Error(detail.error || ('上传 ' + file.name + ' 失败'));
+                    }
+                }
+            }
+
+            for (let i = 0; i < fileList.length; i++) {
+                await uploadFile(fileList[i].kind, fileList[i].file);
+            }
+
+            button.textContent = '正在启动后台分析...';
+            const body = Object.assign({ upload_id: upload.upload_id }, startBody);
+            const startResponse = await fetch(startEndpoint, {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            const startResult = await startResponse.json().catch(() => ({}));
+            if (!startResponse.ok || !startResult.task_url) {
+                throw new Error(startResult.error || '无法启动分析任务');
+            }
+
+            window.location.assign(startResult.task_url);
+        } catch (error) {
+            button.disabled = false;
+            button.textContent = originalText;
+            alert(error.message || '上传失败，请重试');
+        }
+    }
+
+    // 四表合并分析（低库存预警）— 改为分片上传 + 后台任务（排除高库存表单）
+    document.querySelector('.upload-form:not(.high-stock-form)').addEventListener('submit', (event) => {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const button = form.querySelector('.primary-btn');
+        const fileList = [
+            { kind: 'inventory_file', file: form.querySelector('input[name="inventory_file"]').files[0] },
+            { kind: 'sales_file', file: form.querySelector('input[name="sales_file"]').files[0] },
+            { kind: 'transit_file', file: form.querySelector('input[name="transit_file"]').files[0] },
+            { kind: 'hq_file', file: form.querySelector('input[name="hq_file"]').files[0] },
+        ];
+        submitViaChunkedUpload(form, fileList, '/excel-analysis/start', { kind: 'low_stock' }, button, '开始合并分析');
     });
 
-    document.querySelector('.database-form').addEventListener('submit', (event) => {
+    // 数据库分析（已有分片逻辑）
+    document.querySelector('.database-form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+
+        const form = event.currentTarget;
         const button = document.getElementById('db-submit-btn');
+        const hqFile = form.querySelector('input[name="hq_file"]').files[0] || null;
+        const transitFile = form.querySelector('input[name="transit_file"]').files[0] || null;
+        const chunkSize = 512 * 1024;
+
         button.disabled = true;
-        button.textContent = '正在分析，请稍候（预计约30秒）...';
+
+        try {
+            const files = {};
+            if (hqFile) files.hq_file = { name: hqFile.name, size: hqFile.size };
+            if (transitFile) files.transit_file = { name: transitFile.name, size: transitFile.size };
+
+            button.textContent = '正在准备上传...';
+            const initResponse = await fetch('/analysis-uploads/init', {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ files: files })
+            });
+            if (!initResponse.ok) {
+                throw new Error('无法创建上传任务');
+            }
+            const upload = await initResponse.json();
+
+            async function uploadFile(kind, file) {
+                if (!file) return;
+                const totalChunks = Math.ceil(file.size / chunkSize);
+
+                for (let index = 0; index < totalChunks; index++) {
+                    const start = index * chunkSize;
+                    const end = Math.min(start + chunkSize, file.size);
+                    const percent = Math.round((end / file.size) * 100);
+                    button.textContent =
+                        '正在上传 ' + file.name +
+                        ' (' + percent + '%)...';
+
+                    const chunkResponse = await fetch(
+                        '/analysis-uploads/' + encodeURIComponent(upload.upload_id) +
+                        '/' + kind + '/chunks/' + index,
+                        {
+                            method: 'POST',
+                            credentials: 'same-origin',
+                            headers: { 'Content-Type': 'application/octet-stream' },
+                            body: file.slice(start, end)
+                        }
+                    );
+                    if (!chunkResponse.ok) {
+                        const detail = await chunkResponse.json().catch(() => ({}));
+                        throw new Error(
+                            detail.error ||
+                            ('上传 ' + file.name + ' 失败')
+                        );
+                    }
+                }
+            }
+
+            await uploadFile('hq_file', hqFile);
+            await uploadFile('transit_file', transitFile);
+
+            button.textContent = '正在启动后台分析...';
+            const startResponse = await fetch('/database-analysis/start', {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ upload_id: upload.upload_id })
+            });
+            const startResult = await startResponse.json().catch(() => ({}));
+            if (!startResponse.ok || !startResult.task_url) {
+                throw new Error(
+                    startResult.error ||
+                    '无法启动分析任务'
+                );
+            }
+
+            window.location.assign(startResult.task_url);
+        } catch (error) {
+            button.disabled = false;
+            button.textContent = '从数据库分析';
+            alert(
+                error.message ||
+                '上传失败，请重试'
+            );
+        }
     });
 
+    // 高库存分析 — 改为分片上传 + 后台任务
     document.querySelector('.high-stock-form').addEventListener('submit', (event) => {
-        const button = event.currentTarget.querySelector('.high-stock-btn');
-        button.disabled = true;
-        button.textContent = '正在分析...';
+        event.preventDefault();
+        const form = event.currentTarget;
+        const button = form.querySelector('.high-stock-btn');
+        const fileList = [
+            { kind: 'inventory_file', file: form.querySelector('input[name="inventory_file"]').files[0] },
+            { kind: 'annual_sales_file', file: form.querySelector('input[name="annual_sales_file"]').files[0] },
+        ];
+        submitViaChunkedUpload(form, fileList, '/excel-analysis/start', { kind: 'high_stock' }, button, '开始高库存分析');
     });
 </script>
 </body>
