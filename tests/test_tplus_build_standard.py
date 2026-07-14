@@ -128,17 +128,16 @@ class TestTPlusBuildStandard(unittest.TestCase):
 
     @patch("app.data_sources.tplus_openapi_source.query_90day_sales")
     @patch("app.data_sources.tplus_openapi_source.TPlusOpenAPIClient")
-    def test_90day_failure_graceful(self, MockClient, mock_90d):
-        """近90天销量查询失败时，近90天销量默认为 0，不抛异常。"""
+    def test_90day_failure_raises(self, MockClient, mock_90d):
+        """近90天销量查询失败时，应抛出异常。"""
         instance = MockClient.return_value
         instance.query_inventory.return_value = self._mock_inventory_records()
         instance.query_current_stock.return_value = self._mock_stock_records()
         instance.query_recent_sale_delivery_sales.return_value = self._mock_sales_df()
         mock_90d.side_effect = RuntimeError("T+ API 不可用")
 
-        result = build_standard_data_from_tplus_openapi()
-
-        self.assertTrue((result["近90天销量"] == 0).all())
+        with self.assertRaises(RuntimeError):
+            build_standard_data_from_tplus_openapi()
 
     @patch("app.data_sources.tplus_openapi_source.query_90day_sales")
     @patch("app.data_sources.tplus_openapi_source.TPlusOpenAPIClient")

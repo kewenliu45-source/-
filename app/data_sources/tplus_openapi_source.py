@@ -1,9 +1,8 @@
 import json
 import logging
 import os
-import re
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -48,20 +47,18 @@ REFRESH_TOKEN_ENDPOINT = "/auth/v2/refreshToken"
 SELF_BUILT_GENERATE_TOKEN_ENDPOINT = "/v1/common/auth/selfBuiltApp/generateToken"
 INVENTORY_QUERY_ENDPOINT = TPLUS_INVENTORY_QUERY_ENDPOINT
 CURRENT_STOCK_QUERY_ENDPOINT = TPLUS_CURRENT_STOCK_QUERY_ENDPOINT
-SALE_DELIVERY_FIND_VOUCHER_LIST_ENDPOINT = "/tplus/api/v2/SaleDeliveryOpenApi/FindVoucherList"
-SALE_DELIVERY_GET_VOUCHER_DTO_ENDPOINT = "/tplus/api/v2/SaleDeliveryOpenApi/GetVoucherDTO"
 INVENTORY_QUERY_BODY = {
     "param": {
         "SelectFields": "Code,Name,Specification,DefaultBarCode",
     }
 }
 CURRENT_STOCK_QUERY_BODY = {"param": {}}
-SALE_DELIVERY_LIST_BODY = {
-    "selectFields": [],
-    "paramDic": {},
-    "pageIndex": 1,
-    "pageSize": 10,
-}
+
+# 报表查询配置
+REPORT_QUERY_ENDPOINT = "/tplus/api/v2/reportQuery/GetReportData"
+SALE_REPORT_NAME = "SA_SaleDeliveryDetailRpt"
+SALE_REPORT_COLUMNS = "voucherdate,inventoryCode,inventoryName,specification,FreeItem0,quantity,warehouseCode,warehouseName"
+SALE_REPORT_PAGE_SIZE = 1000
 
 
 def _tplus_progress_print(message: str, level: str = "info") -> None:
@@ -181,67 +178,67 @@ class TPlusOpenAPIClient:
         response = self._request("POST", CURRENT_STOCK_QUERY_ENDPOINT, json=CURRENT_STOCK_QUERY_BODY)
         return self._extract_records(response)
 
-    def find_sale_delivery_list(
+    def _fetch_report_data(
         self,
-        page_index: int = 1,
-        page_size: int = 10,
-        param_dic: dict[str, Any] | None = None,
+        report_name: str,
+        columns: str,
+        search_items: list[dict[str, Any]],
+        page_size: int = SALE_REPORT_PAGE_SIZE,
     ) -> list[dict[str, Any]]:
-        body = dict(SALE_DELIVERY_LIST_BODY)
-        body["paramDic"] = param_dic or {}
-        body["pageIndex"] = page_index
-        body["pageSize"] = page_size
-        response = self._post_json_direct(
-            SALE_DELIVERY_FIND_VOUCHER_LIST_ENDPOINT,
-            body,
-        )
-        return _parse_columns_rows_response(response)
+        """调用 T+ 报表接口获取数据，支持分页查询。
 
-    def _find_sale_delivery_list_response(
-        self,
-        page_index: int = 1,
-        page_size: int = 10,
-        param_dic: dict[str, Any] | None = None,
-        debug: bool = True,
-    ) -> dict[str, Any]:
-        body = dict(SALE_DELIVERY_LIST_BODY)
-        body["paramDic"] = param_dic or {}
-        body["pageIndex"] = page_index
-        body["pageSize"] = page_size
-        response = self._post_json_direct(
-            SALE_DELIVERY_FIND_VOUCHER_LIST_ENDPOINT,
-            body,
-            debug=debug,
-        )
-        return response if isinstance(response, dict) else {"data": response}
+        Args:
+            report_name: 报表名称（如 SA_SaleDeliveryDetailRpt）
+            columns: 查询字段（逗号分隔）
+            search_items: 查询条件列表
+            page_size: 每页大小
 
-    def get_sale_delivery_detail(
-        self,
-        voucher_id: str | int | None = None,
-        voucher_code: str | None = None,
-        debug: bool = True,
-    ) -> dict[str, Any]:
-        if voucher_id is None and not voucher_code:
-            raise ValueError("voucher_id 或 voucher_code 至少传一个")
+        Returns:
+            原始行数据列表
 
-        if voucher_id is not None:
-            try:
-                response = self._post_json_direct(
-                    SALE_DELIVERY_GET_VOUCHER_DTO_ENDPOINT,
-                    {"param": {"voucherID": voucher_id}},
-                    debug=debug,
-                )
-                return response if isinstance(response, dict) else {"data": response}
-            except Exception:
-                if not voucher_code:
-                    raise
+        Raises:
+            RuntimeError: 接口调用失败或响应结构异常
+        """
+        all_rows: list[dict[str, Any]] = []
+        page_index = 1
 
-        response = self._post_json_direct(
-            SALE_DELIVERY_GET_VOUCHER_DTO_ENDPOINT,
-            {"param": {"voucherCode": voucher_code}},
-            debug=debug,
-        )
-        return response if isinstance(response, dict) else {"data": response}
+        while True:
+            body = {
+                "request": {
+                    "ReportName": report_name,
+                    "PageIndex": page_index,
+                    "PageSize": page_size,
+                    "SearchItems": search_items,
+                    "ReportTableColNames": columns,
+                }
+            }
+
+            _tplus_progress_print(f"[T+]   报表查询第 {page_index} 页...")
+            response = self._request("POST", REPORT_QUERY_ENDPOINT, json=body)
+
+            # 解析响应
+            data_source = response.get("DataSource") if isinstance(response, dict) else None
+            if not isinstance(data_source, dict):
+                raise RuntimeError(f"报表接口响应缺少 DataSource: {response}")
+
+            rows = data_source.get("Rows")
+            if not isinstance(rows, list):
+                raise RuntimeError(f"报表接口响应缺少 DataSource.Rows: {response}")
+
+            if not rows:
+                _tplus_progress_print(f"[T+]   第 {page_index} 页无数据，停止翻页")
+                break
+
+            all_rows.extend(rows)
+            _tplus_progress_print(f"[T+]   第 {page_index} 页获取 {len(rows)} 条，累计 {len(all_rows)} 条")
+
+            # 如果本页数据少于 page_size，说明已到末页
+            if len(rows) < page_size:
+                break
+
+            page_index += 1
+
+        return all_rows
 
     def query_recent_sale_delivery_sales(
         self,
@@ -254,14 +251,28 @@ class TPlusOpenAPIClient:
         force_refresh: bool = False,
         column_name: str = "近7天销量",
     ) -> pd.DataFrame:
+        """查询近N天销售数据，使用报表接口获取。
+
+        Args:
+            days: 查询天数
+            page_size: 保留参数，不再使用
+            max_pages: 保留参数，不再使用
+            max_detail_workers: 保留参数，不再使用
+            param_dic: 保留参数，不再使用
+            end_date: 结束日期，默认今天
+            force_refresh: 是否强制刷新缓存
+            column_name: 结果列名
+
+        Returns:
+            DataFrame: 存货编码, 尺码, column_name, 日均销量
+        """
         end = end_date or date.today()
         start = end - timedelta(days=days - 1)
         cache_key = {
-            "version": 4,
+            "version": 5,
             "days": days,
             "end_date": end.isoformat(),
             "column_name": column_name,
-            "param_dic": param_dic or {},
         }
         if not force_refresh:
             cached_sales_df = _read_recent_sales_cache(cache_key)
@@ -269,89 +280,56 @@ class TPlusOpenAPIClient:
                 _tplus_progress_print(f"[T+]   {column_name}命中缓存，{len(cached_sales_df)} 条", "success")
                 return cached_sales_df
 
-        _tplus_progress_print(f"[T+]   {column_name}缓存未命中，开始查询销货单列表...")
-        first_page = self._find_sale_delivery_list_response(
-            page_index=1,
-            page_size=page_size,
-            param_dic=param_dic,
-            debug=False,
+        _tplus_progress_print(f"[T+]   {column_name}缓存未命中，开始查询销售报表...")
+
+        # 构建查询条件
+        search_items = [
+            {
+                "ColumnName": "voucherdate",
+                "BeginDefault": start.isoformat(),
+                "EndDefault": end.isoformat(),
+            },
+        ]
+        if WARNING_WAREHOUSE_CODE:
+            search_items.append({
+                "ColumnName": "warehouseCode",
+                "BeginDefault": WARNING_WAREHOUSE_CODE,
+                "EndDefault": WARNING_WAREHOUSE_CODE,
+            })
+
+        # 调用报表接口
+        raw_rows = self._fetch_report_data(
+            report_name=SALE_REPORT_NAME,
+            columns=SALE_REPORT_COLUMNS,
+            search_items=search_items,
         )
-        total_pages = _to_int(_dig(first_page, "data", "TotalPageNum")) or 1
 
-        candidate_vouchers_by_key: dict[tuple[Any, Any], dict[str, Any]] = {}
-        scanned_pages: set[int] = set()
-
-        def scan_page(page_index: int) -> bool:
-            if page_index == 1:
-                list_response = first_page
-            else:
-                list_response = self._find_sale_delivery_list_response(
-                    page_index=page_index,
-                    page_size=page_size,
-                    param_dic=param_dic,
-                    debug=False,
-                )
-            scanned_pages.add(page_index)
-            vouchers = _parse_columns_rows_response(list_response)
-            page_dates = [
-                voucher_date
-                for voucher_date in (_extract_voucher_code_date(voucher) for voucher in vouchers)
-                if voucher_date is not None
-            ]
-
-            for voucher in vouchers:
-                voucher_code_date = _extract_voucher_code_date(voucher)
-                if voucher_code_date is not None and (voucher_code_date < start or voucher_code_date > end):
-                    continue
-                if voucher_code_date is None and not param_dic:
-                    continue
-
-                voucher_id = voucher.get("id")
-                voucher_code = voucher.get("code")
-                if not voucher_id and not voucher_code:
-                    continue
-
-                candidate_vouchers_by_key[(voucher_id, voucher_code)] = voucher
-
-            return bool(page_dates and max(page_dates) < start)
-
-        last_page_to_scan = min(total_pages, max_pages)
-        for page_index in range(1, last_page_to_scan + 1):
-            if scan_page(page_index):
-                break
-
-        first_tail_page = max(1, total_pages - max_pages + 1)
-        for page_index in range(total_pages, first_tail_page - 1, -1):
-            if page_index in scanned_pages:
-                continue
-            scan_page(page_index)
-
-        candidate_vouchers = list(candidate_vouchers_by_key.values())
-        _tplus_progress_print(f"[T+]   {column_name}找到 {len(candidate_vouchers)} 张销货单，开始查询明细...")
-
+        # 转换为标准格式
         rows: list[dict[str, Any]] = []
-        worker_count = max(1, min(max_detail_workers, len(candidate_vouchers) or 1))
-        done_count = 0
-        with ThreadPoolExecutor(max_workers=worker_count) as executor:
-            futures = [
-                executor.submit(
-                    self.get_sale_delivery_detail,
-                    voucher_id=voucher.get("id"),
-                    voucher_code=voucher.get("code"),
-                    debug=False,
-                )
-                for voucher in candidate_vouchers
-            ]
-            for future in as_completed(futures):
-                done_count += 1
-                if done_count % 10 == 0 or done_count == len(candidate_vouchers):
-                    _tplus_progress_print(f"[T+]   {column_name}明细进度: {done_count}/{len(candidate_vouchers)}")
-                try:
-                    detail_response = future.result()
-                except Exception as exc:
-                    print(f"[DEBUG-SALE-DELIVERY] skip detail error: {exc}")
+        for row in raw_rows:
+            voucher_date = _parse_date(row.get("voucherdate"))
+            if voucher_date is None or voucher_date < start or voucher_date > end:
+                continue
+
+            warehouse_code = str(row.get("warehouseCode", "")).strip()
+            # 仓库过滤：WARNING_WAREHOUSE_CODE 存在时，warehouseCode 必须标准化后严格等于配置仓库
+            if WARNING_WAREHOUSE_CODE:
+                if not warehouse_code:
+                    continue  # warehouseCode 为空或缺失时必须丢弃
+                if _normalize_warehouse_code(warehouse_code) != _normalize_warehouse_code(WARNING_WAREHOUSE_CODE):
                     continue
-                rows.extend(_extract_sale_delivery_sales_rows(detail_response, start, end))
+
+            inventory_code = clean_code(row.get("inventoryCode", ""))
+            if not inventory_code:
+                continue
+
+            rows.append({
+                "存货编码": inventory_code,
+                "尺码": clean_size(row.get("FreeItem0", "")),
+                "销售数量": pd.to_numeric(row.get("quantity", 0), errors="coerce"),
+                "仓库编码": warehouse_code,
+                "仓库": str(row.get("warehouseName", "")),
+            })
 
         if not rows:
             empty_result = pd.DataFrame(columns=["存货编码", "尺码", column_name, "日均销量"])
@@ -360,31 +338,6 @@ class TPlusOpenAPIClient:
 
         result = _build_recent_sales_summary_df(rows, days, column_name=column_name)
         _write_recent_sales_cache(cache_key, result)
-        return result
-
-    def _post_json_direct(self, endpoint: str, body: dict[str, Any], debug: bool = True) -> Any:
-        url = f"{TPLUS_API_BASE_URL}{endpoint}"
-        headers = {
-            "openToken": self.get_access_token(),
-            "appKey": TPLUS_APP_KEY,
-            "appSecret": APP_SECRET,
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-        }
-
-        if debug:
-            _debug_sale_delivery_request(url, headers, body)
-        response = requests.post(url, headers=headers, json=body, timeout=TPLUS_REQUEST_TIMEOUT)
-        try:
-            result = response.json()
-        except ValueError:
-            result = {"raw_text": response.text}
-
-        if debug:
-            _debug_sale_delivery_response(response.status_code, result, url, headers, body)
-        if isinstance(result, dict) and _is_api_error(result):
-            raise RuntimeError(f"{result.get('code')}: {result.get('message') or result}")
-
         return result
 
     def _query_all_pages(self, endpoint: str) -> list[dict[str, Any]]:
@@ -825,13 +778,9 @@ def build_standard_data_from_tplus_openapi(
     def fetch_sales_90d():
         nonlocal sales_90_df
         _tplus_progress_print("[T+] 开始查询近90天销量...")
-        try:
-            sales_90_df = query_90day_sales()
-            count = len(sales_90_df) if sales_90_df is not None and not sales_90_df.empty else 0
-            _tplus_progress_print(f"[T+] [OK] 近90天销量: {count} 条", "success")
-        except Exception as exc:
-            logging.warning("近90天销量查询失败，降级为0: %s", exc)
-            _tplus_progress_print(f"[T+] [FAIL] 近90天销量查询失败: {exc}", "warning")
+        sales_90_df = query_90day_sales()
+        count = len(sales_90_df) if sales_90_df is not None and not sales_90_df.empty else 0
+        _tplus_progress_print(f"[T+] [OK] 近90天销量: {count} 条", "success")
 
     _tplus_progress_print("[T+] 并行查询存货/库存/7天销量/90天销量...")
     with ThreadPoolExecutor(max_workers=4) as executor:
@@ -1073,7 +1022,6 @@ def _diagnose_query_response(
     pagination: dict[str, Any] = {}
 
     if isinstance(response, list):
-        # response 直接是记录列表，无分页信息
         print(f"[DIAG] response type: list, len={len(response)}")
         records = [item for item in response if isinstance(item, dict)]
 
@@ -1086,7 +1034,6 @@ def _diagnose_query_response(
                 if key in data:
                     pagination[key] = data[key]
                     print(f"[DIAG] data.{key} = {data[key]}")
-            # records 可能在 data.rows / data.Rows / data.records 等
             for key in ("rows", "Rows", "items", "Items", "list", "List", "records", "Records"):
                 val = data.get(key)
                 if isinstance(val, list):
@@ -1294,27 +1241,22 @@ def test_tplus_inventory_paging_candidates() -> list[dict[str, Any]]:
     all_results: list[dict[str, Any]] = []
 
     candidates = [
-        # 1. 原始 body
         {
             "label": "原始 body",
             "body": {"param": {"SelectFields": "Code,Name,Specification,DefaultBarCode"}},
         },
-        # 2. pageIndex/pageSize 在顶层
         {
             "label": "顶层 pageIndex/pageSize",
             "body": {"param": {"SelectFields": "Code,Name,Specification,DefaultBarCode"}, "pageIndex": 1, "pageSize": 500},
         },
-        # 3. PageIndex/PageSize 在 param 内（大写）
         {
             "label": "param 内 PageIndex/PageSize 大写",
             "body": {"param": {"SelectFields": "Code,Name,Specification,DefaultBarCode", "PageIndex": 1, "PageSize": 500}},
         },
-        # 4. pageIndex/pageSize 在 param 内（小写）
         {
             "label": "param 内 pageIndex/pageSize 小写",
             "body": {"param": {"SelectFields": "Code,Name,Specification,DefaultBarCode", "pageIndex": 1, "pageSize": 500}},
         },
-        # 5. SaleDelivery 风格 body
         {
             "label": "SaleDelivery 风格",
             "body": {"selectFields": ["Code", "Name", "Specification", "DefaultBarCode"], "paramDic": {}, "pageIndex": 1, "pageSize": 500},
@@ -1444,7 +1386,6 @@ def test_tplus_warehouse_query_candidates() -> list[dict[str, Any]]:
                     wh_name = rec.get("WarehouseName") or rec.get("warehouseName") or rec.get("WhName") or ""
                     print(f"  [{i}] Code={code}, Name={name}, WarehouseCode={wh_code}, WarehouseName={wh_name}")
 
-                # 检查是否有"在途"相关记录
                 transit_hits = []
                 for rec in records[:20]:
                     name = str(rec.get("Name") or rec.get("name") or rec.get("WarehouseName") or rec.get("warehouseName") or "")
@@ -1573,50 +1514,6 @@ def test_tplus_stock_with_warehouse_filter(
     print("=" * 60)
 
     return all_results
-
-
-def test_inventory_query() -> dict[str, Any]:
-    client = TPlusOpenAPIClient()
-    url = f"{TPLUS_API_BASE_URL}{INVENTORY_QUERY_ENDPOINT}"
-    headers = {
-        "openToken": client.get_access_token(force_refresh=True),
-        "appKey": TPLUS_APP_KEY,
-        "appSecret": TPLUS_APP_SECRET,
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-    }
-    body = INVENTORY_QUERY_BODY
-
-    print("[DEBUG-TPLUS-TEST] url:")
-    print(url)
-    print("[DEBUG-TPLUS-TEST] headers:")
-    print(json.dumps(_mask_token_payload(headers), ensure_ascii=False, indent=2))
-    print("[DEBUG-TPLUS-TEST] body:")
-    print(json.dumps(body, ensure_ascii=False, indent=2))
-
-    response = requests.post(url, headers=headers, json=body, timeout=30)
-    try:
-        response_json = response.json()
-    except ValueError:
-        response_json = {"raw_text": response.text}
-
-    print("[DEBUG-TPLUS-TEST] status_code:")
-    print(response.status_code)
-    print("[DEBUG-TPLUS-TEST] response:")
-    print(json.dumps(_mask_token_payload(response_json), ensure_ascii=False, indent=2))
-
-    if isinstance(response_json, dict) and _is_exsv0011_response(response_json):
-        _debug_tplus_curl(url, headers, {"json": body})
-
-    return response_json
-
-
-def test_find_sale_delivery_list() -> list[dict[str, Any]]:
-    client = TPlusOpenAPIClient()
-    rows = client.find_sale_delivery_list(page_index=1, page_size=10)
-    print("[DEBUG-SALE-DELIVERY-TEST] parsed rows:")
-    print(json.dumps(rows, ensure_ascii=False, indent=2))
-    return rows
 
 
 def _build_inventory_master_df(records: list[dict[str, Any]]) -> pd.DataFrame:
@@ -1837,57 +1734,6 @@ def _parse_date(value: Any) -> date | None:
     return None
 
 
-def _extract_voucher_code_date(voucher: dict[str, Any]) -> date | None:
-    for key in ("code", "externalCode", "externalcode"):
-        value = voucher.get(key)
-        if not value:
-            continue
-        match = re.search(r"(20\d{2})[-/]?(\d{2})[-/]?(\d{2})", str(value))
-        if not match:
-            continue
-        try:
-            return date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
-        except ValueError:
-            continue
-    return None
-
-
-def _extract_sale_delivery_sales_rows(
-    detail_response: dict[str, Any],
-    start: date,
-    end: date,
-) -> list[dict[str, Any]]:
-    detail = detail_response.get("data") if isinstance(detail_response, dict) else None
-    if not isinstance(detail, dict):
-        return []
-
-    voucher_date = _parse_date(detail.get("VoucherDate"))
-    if voucher_date is None or voucher_date < start or voucher_date > end:
-        return []
-
-    header_warehouse_code = _extract_warehouse_code(detail)
-    header_warehouse_name = _extract_warehouse_name(detail)
-    rows: list[dict[str, Any]] = []
-    for line in detail.get("SaleDeliveryDetails") or []:
-        if not isinstance(line, dict):
-            continue
-        inventory_code = clean_code(_dig(line, "Inventory", "Code"))
-        if not inventory_code:
-            continue
-        warehouse_code = _extract_warehouse_code(line) or header_warehouse_code
-        warehouse_name = _extract_warehouse_name(line) or header_warehouse_name
-        rows.append(
-            {
-                "存货编码": inventory_code,
-                "尺码": clean_size(_first_dynamic_value(line)),
-                "销售数量": _to_number(line.get("Quantity")),
-                "仓库编码": warehouse_code,
-                "仓库": warehouse_name,
-            }
-        )
-    return rows
-
-
 def _build_recent_sales_summary_df(
     rows: list[dict[str, Any]],
     days: int = SAFE_DAYS,
@@ -1915,28 +1761,6 @@ def _build_recent_sales_summary_df(
     result[column_name] = result[column_name].clip(lower=0)
     result["日均销量"] = result[column_name] / days
     return result
-
-
-def _extract_warehouse_code(item: dict[str, Any]) -> str:
-    value = (
-        _field(item, "WarehouseCode", "warehouseCode", "WhCode", "whCode")
-        or _dig(item, "Warehouse", "Code")
-        or _dig(item, "Warehouse", "code")
-        or _dig(item, "WarehouseDTO", "Code")
-        or _dig(item, "WarehouseDTO", "code")
-    )
-    return str(value or "").strip()
-
-
-def _extract_warehouse_name(item: dict[str, Any]) -> str:
-    value = (
-        _field(item, "WarehouseName", "warehouseName", "WhName", "whName")
-        or _dig(item, "Warehouse", "Name")
-        or _dig(item, "Warehouse", "name")
-        or _dig(item, "WarehouseDTO", "Name")
-        or _dig(item, "WarehouseDTO", "name")
-    )
-    return str(value or "").strip()
 
 
 def _read_recent_sales_cache(cache_key: dict[str, Any]) -> pd.DataFrame | None:
@@ -2066,39 +1890,6 @@ def _debug_tplus_business_response_from_error(response: requests.Response) -> No
     _debug_tplus_business_response(response.status_code, response_json)
 
 
-def _debug_sale_delivery_request(url: str, headers: dict[str, str], body: dict[str, Any]) -> None:
-    print("[DEBUG-SALE-DELIVERY] url:")
-    print(url)
-    print("[DEBUG-SALE-DELIVERY] headers:")
-    print(json.dumps(_mask_secret_headers(headers), ensure_ascii=False, indent=2))
-    print("[DEBUG-SALE-DELIVERY] body:")
-    print(json.dumps(body, ensure_ascii=False, indent=2))
-
-
-def _debug_sale_delivery_response(
-    status_code: int,
-    response_json: Any,
-    url: str,
-    headers: dict[str, str],
-    body: dict[str, Any],
-) -> None:
-    print("[DEBUG-SALE-DELIVERY] status_code:")
-    print(status_code)
-    print("[DEBUG-SALE-DELIVERY] response:")
-    print(json.dumps(response_json, ensure_ascii=False, indent=2))
-    if _is_api_error(response_json):
-        print("[DEBUG-SALE-DELIVERY] curl:")
-        print(_build_masked_curl(url, headers, body))
-
-
-def _build_masked_curl(url: str, headers: dict[str, str], body: dict[str, Any]) -> str:
-    parts = ["curl -X POST", f'"{url}"']
-    for key, value in _mask_secret_headers(headers).items():
-        parts.append(f'-H "{key}: {value}"')
-    parts.append(f"--data '{json.dumps(body, ensure_ascii=False)}'")
-    return " \\\n  ".join(parts)
-
-
 def _is_api_error(response_json: Any) -> bool:
     if isinstance(response_json, list):
         return False
@@ -2108,18 +1899,6 @@ def _is_api_error(response_json: Any) -> bool:
     if code is None:
         code = _dig(response_json, "data", "Code")
     return str(code) not in {"0", "200", "", "None"}
-
-
-def _mask_secret_headers(headers: dict[str, str]) -> dict[str, str]:
-    masked: dict[str, str] = {}
-    for key, value in headers.items():
-        if key == "openToken":
-            masked[key] = _mask_secret(str(value), head=8, tail=4)
-        elif key == "appSecret":
-            masked[key] = _mask_secret(str(value), head=4, tail=4)
-        else:
-            masked[key] = value
-    return masked
 
 
 def _debug_tplus_curl(url: str, headers: dict[str, str], request_kwargs: dict[str, Any]) -> None:
