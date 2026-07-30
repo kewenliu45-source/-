@@ -65,9 +65,9 @@
     <main class="main upload-main">
         <header class="topbar upload-hero">
             <div>
-                <span class="eyebrow">四表合并分析</span>
+                <span class="eyebrow">库存合并分析</span>
                 <h1>上传库存数据</h1>
-                <p>导入本地库存、近期销售、在途库存、总部可用量四张 Excel 表，系统将自动匹配 SKU、识别缺货风险并生成调货建议。</p>
+                <p>导入本地库存、近期销售、总部可用量 Excel 表；在途库存（未发货）可选，不上传时按 0 处理。</p>
             </div>
             <div class="hero-status">
                 <span>处理流程</span>
@@ -79,8 +79,8 @@
             <div class="upload-panel upload-card">
                 <div class="panel-title">
                     <span class="eyebrow">数据源</span>
-                    <h2>请选择需要分析的 4 份表格</h2>
-                    <p>支持 .xlsx / .xls 文件。请按下方顺序上传，字段格式保持原始业务表结构即可。</p>
+                    <h2>请选择需要分析的表格</h2>
+                    <p>本地库存、近期销售、总部库存为必传；在途库存（未发货）可选。支持 .xlsx / .xls 文件。</p>
                 </div>
 
                 <form class="upload-form" action="/upload" method="post" enctype="multipart/form-data">
@@ -107,12 +107,12 @@
                     </label>
 
                     <label class="upload-box">
-                        <input type="file" name="transit_file" accept=".xlsx,.xls" required>
+                        <input type="file" name="transit_file" accept=".xlsx,.xls">
                         <span class="upload-step">03</span>
                         <span class="upload-icon">🚚</span>
                         <span class="upload-content">
-                            <strong>在途库存表（未发货）</strong>
-                            <small>只含未发货在途，宽表格式（货号/尺码 + 各尺码列）</small>
+                            <strong>在途库存表（未发货，可选）</strong>
+                            <small>不上传时在途（未发货）按 0 处理；只作为结果展示字段</small>
                             <em data-empty="未选择文件">未选择文件</em>
                         </span>
                     </label>

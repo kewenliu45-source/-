@@ -584,14 +584,14 @@ async def upload_files(
     request: Request,
     inventory_file: UploadFile = File(...),
     sales_file: UploadFile = File(...),
-    transit_file: UploadFile = File(...),
+    transit_file: UploadFile | None = File(None),
     hq_file: UploadFile = File(...),
 ):
     try:
         standard_df, warnings = build_standard_data(
             inventory_file.file,
             sales_file.file,
-            transit_file.file if transit_file else None,
+            transit_file.file if transit_file and transit_file.filename else None,
             hq_file.file if hq_file else None,
         )
 
@@ -1143,4 +1143,3 @@ async def export_inventory_table():
     except Exception as exc:
         logger.exception("导出库存表失败")
         return HTMLResponse(content=f"导出失败: {str(exc)}", status_code=500)
-

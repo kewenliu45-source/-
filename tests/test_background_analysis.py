@@ -101,6 +101,55 @@ class BackgroundDatabaseAnalysisTests(unittest.TestCase):
         self.assertEqual(len(submitted), 1)
         self.assertEqual(submitted[0][1][1], b"abcdef")
 
+    def test_excel_chunked_upload_allows_missing_transit_file(self):
+        submitted = []
+
+        def capture_submit(function, *args):
+            submitted.append((function, args))
+
+        with (
+            patch("app.main.get_current_user", return_value=self.user),
+            patch("app.routers.upload_router.get_current_user", return_value=self.user),
+            patch.object(upload_router._analysis_executor, "submit", side_effect=capture_submit),
+        ):
+            client = TestClient(app)
+            init_response = client.post(
+                "/analysis-uploads/init",
+                json={
+                    "files": {
+                        "inventory_file": {"name": "inventory.xlsx", "size": 3},
+                        "sales_file": {"name": "sales.xlsx", "size": 3},
+                        "hq_file": {"name": "hq.xlsx", "size": 3},
+                    }
+                },
+            )
+            self.assertEqual(init_response.status_code, 200)
+            upload_id = init_response.json()["upload_id"]
+
+            for kind, content in {
+                "inventory_file": b"inv",
+                "sales_file": b"sal",
+                "hq_file": b"hq!",
+            }.items():
+                chunk_response = client.post(
+                    f"/analysis-uploads/{upload_id}/{kind}/chunks/0",
+                    content=content,
+                    headers={"Content-Type": "application/octet-stream"},
+                )
+                self.assertTrue(chunk_response.json()["complete"])
+
+            start_response = client.post(
+                "/excel-analysis/start",
+                json={"upload_id": upload_id, "kind": "low_stock"},
+            )
+
+        self.assertEqual(start_response.status_code, 202)
+        self.assertEqual(len(submitted), 1)
+        self.assertEqual(submitted[0][1][1], b"inv")
+        self.assertEqual(submitted[0][1][2], b"sal")
+        self.assertIsNone(submitted[0][1][3])
+        self.assertEqual(submitted[0][1][4], b"hq!")
+
 
 if __name__ == "__main__":
     unittest.main()
