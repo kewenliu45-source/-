@@ -30,16 +30,6 @@
             调货建议
         </a>
 
-        <div class="menu-section">通知中心</div>
-        <a class="menu" href="/">
-            <span class="menu-icon">✉</span>
-            企业微信提醒
-        </a>
-        <a class="menu" href="/">
-            <span class="menu-icon">☰</span>
-            每日汇总
-        </a>
-
         {% if current_user and current_user.role == 'admin' %}
         <div class="menu-section">系统管理</div>
         <a class="menu" href="/users">
@@ -163,10 +153,6 @@
                             </label>
                         </div>
                         <div class="database-actions">
-                            <div class="export-actions">
-                                <a class="export-btn" href="/export/sales" target="_blank">导出近7天销售表</a>
-                                <a class="export-btn" href="/export/inventory" target="_blank">导出库存表</a>
-                            </div>
                             <button class="secondary-btn" type="submit" id="db-submit-btn">从数据库分析</button>
                         </div>
                     </div>

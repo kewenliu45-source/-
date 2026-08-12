@@ -18,10 +18,6 @@
         <a class="menu active" href="#warning-detail">预警结果</a>
         <a class="menu" href="#transfer-advice">调货建议</a>
 
-        <div class="menu-section">通知中心</div>
-        <a class="menu" href="/">企业微信提醒</a>
-        <a class="menu" href="/">每日汇总</a>
-
         <div class="menu-section">系统管理</div>
         <a class="menu" href="/">系统设置</a>
     </aside>
@@ -34,14 +30,9 @@
             </div>
 
             <div class="action-group">
-                <form action="/send-daily-summary" method="post" target="_blank">
-                    <button class="summary-btn" type="submit">发送每日汇总</button>
-                </form>
                 {% if output_filename %}
                 <a class="download-btn" href="/download/{{ output_filename }}">下载Excel</a>
                 {% endif %}
-                <a class="download-btn" href="/export/sales" target="_blank">导出销售表</a>
-                <a class="download-btn" href="/export/inventory" target="_blank">导出库存表</a>
                 <button class="download-btn" id="export-filtered-btn" type="button">导出筛选结果</button>
             </div>
         </header>

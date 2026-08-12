@@ -201,17 +201,21 @@ class TPlusOpenAPIClient:
         """
         all_rows: list[dict[str, Any]] = []
         page_index = 1
+        task_session_id: str | None = None
 
         while True:
-            body = {
-                "request": {
-                    "ReportName": report_name,
-                    "PageIndex": page_index,
-                    "PageSize": page_size,
-                    "SearchItems": search_items,
-                    "ReportTableColNames": columns,
-                }
+            request_body: dict[str, Any] = {
+                "ReportName": report_name,
+                "PageIndex": page_index,
+                "PageSize": page_size,
+                "SearchItems": search_items,
+                "ReportTableColNames": columns,
             }
+            # 第 2 页起必须带上 TaskSessionID
+            if task_session_id:
+                request_body["TaskSessionID"] = task_session_id
+
+            body = {"request": request_body}
 
             _tplus_progress_print(f"[T+]   报表查询第 {page_index} 页...")
             response = self._request("POST", REPORT_QUERY_ENDPOINT, json=body)
@@ -220,6 +224,10 @@ class TPlusOpenAPIClient:
             data_source = response.get("DataSource") if isinstance(response, dict) else None
             if not isinstance(data_source, dict):
                 raise RuntimeError(f"报表接口响应缺少 DataSource: {response}")
+
+            # 首页提取 TaskSessionID，后续页必须带上
+            if task_session_id is None and isinstance(response, dict):
+                task_session_id = response.get("TaskSessionID")
 
             rows = data_source.get("Rows")
             if not isinstance(rows, list):
