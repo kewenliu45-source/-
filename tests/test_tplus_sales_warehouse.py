@@ -63,12 +63,15 @@ class TPlusSalesWarehouseTests(unittest.TestCase):
         client = TPlusOpenAPIClient()
         client._fetch_report_data = MagicMock(return_value=rows)
 
-        with patch("app.data_sources.tplus_openapi_source._write_recent_sales_cache"):
+        with patch("app.data_sources.tplus_openapi_source._write_recent_sales_cache") as mock_cache:
             result = client.query_recent_sale_delivery_sales(
                 days=7,
                 end_date=date(2026, 7, 13),
                 force_refresh=True,
             )
+
+        self.assertEqual(result.iloc[0]["存货"], "商品A")
+        self.assertEqual(mock_cache.call_args.args[0]["version"], 6)
 
         # 验证 _fetch_report_data 被调用
         client._fetch_report_data.assert_called_once()
@@ -184,6 +187,17 @@ class TPlusSalesWarehouseTests(unittest.TestCase):
         self.assertEqual(len(result), 3)
         sku1_m = result[(result["存货编码"] == "SKU001") & (result["尺码"] == "M")]
         self.assertEqual(sku1_m.iloc[0]["近7天销量"], 8)
+
+    def test_summary_keeps_first_non_empty_inventory_name(self):
+        """销售汇总保留同一 SKU+尺码的首个非空名称。"""
+        rows = [
+            {"存货编码": "SKU001", "存货": " ", "尺码": "M", "销售数量": 5, "仓库编码": "006"},
+            {"存货编码": "SKU001", "存货": "商品A", "尺码": "M", "销售数量": 3, "仓库编码": "006"},
+        ]
+
+        result = _build_recent_sales_summary_df(rows, days=7)
+
+        self.assertEqual(result.iloc[0]["存货"], "商品A")
 
     def test_empty_result_format(self):
         """空结果返回正确格式"""

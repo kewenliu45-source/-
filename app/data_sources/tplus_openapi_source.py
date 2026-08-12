@@ -277,7 +277,7 @@ class TPlusOpenAPIClient:
         end = end_date or date.today()
         start = end - timedelta(days=days - 1)
         cache_key = {
-            "version": 5,
+            "version": 6,
             "days": days,
             "end_date": end.isoformat(),
             "column_name": column_name,
@@ -333,6 +333,7 @@ class TPlusOpenAPIClient:
 
             rows.append({
                 "存货编码": inventory_code,
+                "存货": _clean_inventory_name(row.get("inventoryName")),
                 "尺码": clean_size(row.get("FreeItem0", "")),
                 "销售数量": pd.to_numeric(row.get("quantity", 0), errors="coerce"),
                 "仓库编码": warehouse_code,
@@ -340,7 +341,7 @@ class TPlusOpenAPIClient:
             })
 
         if not rows:
-            empty_result = pd.DataFrame(columns=["存货编码", "尺码", column_name, "日均销量"])
+            empty_result = pd.DataFrame(columns=["存货编码", "存货", "尺码", column_name, "日均销量"])
             _write_recent_sales_cache(cache_key, empty_result)
             return empty_result
 
@@ -845,11 +846,23 @@ def build_standard_data_from_tplus_openapi(
         )
         inventory_master_df = inventory_master_df.drop_duplicates(subset=["存货编码", "尺码"])
 
+    inventory_name_map: dict[str, str] = {}
+    for _, row in inventory_master_df[["存货编码", "存货"]].iterrows():
+        code = clean_code(row["存货编码"])
+        name = _clean_inventory_name(row["存货"])
+        if code and name and code not in inventory_name_map:
+            inventory_name_map[code] = name
+
     # 以 sales_df 为主表 LEFT JOIN stock（保持销货单的尺码格式，确保销售数据匹配正确）
     if sales_df is None or sales_df.empty:
         sales_df = inventory_master_df[["存货编码", "存货", "尺码"]].copy()
         sales_df["近7天销量"] = 0
         sales_df["日均销量"] = 0.0
+    else:
+        sales_df = sales_df.copy()
+        if "存货" not in sales_df.columns:
+            sales_df["存货"] = ""
+        sales_df["存货"] = sales_df["存货"].map(_clean_inventory_name)
 
     standard_df = sales_df.merge(
         stock_df[["存货编码", "尺码", "存货", "仓库编码", "仓库", "当前现存量", "当前可用量"]],
@@ -859,19 +872,19 @@ def build_standard_data_from_tplus_openapi(
     )
     # 存货名称补全：优先用 sales 的，缺失时用 stock 的
     if "存货_库存" in standard_df.columns:
-        if "存货" in standard_df.columns:
-            standard_df["存货"] = standard_df["存货"].fillna(standard_df["存货_库存"])
-        else:
-            standard_df["存货"] = standard_df["存货_库存"]
+        standard_df["存货"] = standard_df["存货"].map(_clean_inventory_name)
+        stock_names = standard_df["存货_库存"].map(_clean_inventory_name)
+        missing_name = standard_df["存货"] == ""
+        standard_df.loc[missing_name, "存货"] = stock_names[missing_name]
         standard_df = standard_df.drop(columns=["存货_库存"])
     if "存货" not in standard_df.columns:
         standard_df["存货"] = ""
-    # 用 stock_name_map 补全仍然缺失的存货名称
-    standard_df["存货"] = standard_df["存货"].fillna("")
+    # 用已查询的存货档案补全仍然缺失的名称，不增加接口请求
+    standard_df["存货"] = standard_df["存货"].map(_clean_inventory_name)
     still_empty = standard_df["存货"] == ""
-    if still_empty.any() and stock_name_map:
+    if still_empty.any() and inventory_name_map:
         standard_df.loc[still_empty, "存货"] = (
-            standard_df.loc[still_empty, "存货编码"].map(stock_name_map).fillna("")
+            standard_df.loc[still_empty, "存货编码"].map(inventory_name_map).fillna("")
         )
     standard_df["仓库编码"] = standard_df["仓库编码"].fillna(WARNING_WAREHOUSE_CODE)
     standard_df["仓库"] = standard_df["仓库"].fillna("")
@@ -1742,16 +1755,32 @@ def _parse_date(value: Any) -> date | None:
     return None
 
 
+def _clean_inventory_name(value: Any) -> str:
+    if value is None or pd.isna(value):
+        return ""
+    return str(value).strip()
+
+
+def _first_non_empty_inventory_name(values: pd.Series) -> str:
+    for value in values:
+        name = _clean_inventory_name(value)
+        if name:
+            return name
+    return ""
+
+
 def _build_recent_sales_summary_df(
     rows: list[dict[str, Any]],
     days: int = SAFE_DAYS,
     column_name: str = "近7天销量",
 ) -> pd.DataFrame:
     if not rows:
-        return pd.DataFrame(columns=["存货编码", "尺码", column_name, "日均销量"])
+        return pd.DataFrame(columns=["存货编码", "存货", "尺码", column_name, "日均销量"])
 
     sales_df = pd.DataFrame(rows)
     sales_df["销售数量"] = pd.to_numeric(sales_df["销售数量"], errors="coerce").fillna(0)
+    if "存货" not in sales_df.columns:
+        sales_df["存货"] = ""
 
     if WARNING_WAREHOUSE_CODE and "仓库编码" in sales_df.columns:
         warehouse_codes = sales_df["仓库编码"].fillna("").astype(str).str.strip()
@@ -1759,11 +1788,11 @@ def _build_recent_sales_summary_df(
             sales_df = sales_df[warehouse_codes == WARNING_WAREHOUSE_CODE].copy()
 
     if sales_df.empty:
-        return pd.DataFrame(columns=["存货编码", "尺码", column_name, "日均销量"])
+        return pd.DataFrame(columns=["存货编码", "存货", "尺码", column_name, "日均销量"])
 
     result = (
-        sales_df.groupby(["存货编码", "尺码"], as_index=False)["销售数量"]
-        .sum()
+        sales_df.groupby(["存货编码", "尺码"], as_index=False)
+        .agg({"销售数量": "sum", "存货": _first_non_empty_inventory_name})
         .rename(columns={"销售数量": column_name})
     )
     result[column_name] = result[column_name].clip(lower=0)
@@ -1796,7 +1825,7 @@ def _read_recent_sales_cache(cache_key: dict[str, Any]) -> pd.DataFrame | None:
 
     # 从 cache_key 中获取实际的列名，兼容近7天/近90天等不同查询
     column_name = cache_key.get("column_name", "近7天销量")
-    return pd.DataFrame(rows, columns=["存货编码", "尺码", column_name, "日均销量"])
+    return pd.DataFrame(rows, columns=["存货编码", "存货", "尺码", column_name, "日均销量"])
 
 
 def _write_recent_sales_cache(cache_key: dict[str, Any], sales_df: pd.DataFrame) -> None:

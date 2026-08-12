@@ -100,6 +100,34 @@ class TestTPlusBuildStandard(unittest.TestCase):
 
     @patch("app.data_sources.tplus_openapi_source.query_90day_sales")
     @patch("app.data_sources.tplus_openapi_source.TPlusOpenAPIClient")
+    def test_sales_without_name_falls_back_to_inventory_master(self, MockClient, mock_90d):
+        """有销量但无库存记录时，空名称应从存货档案按编码回填。"""
+        instance = MockClient.return_value
+        instance.query_inventory.return_value = [
+            {"Code": "SKU001", "Name": "商品A", "Specification": "M"},
+            {"Code": "SKU001", "Name": "商品A", "Specification": "L"},
+            {"Code": "SKU001", "Name": "商品A", "Specification": "XL"},
+        ]
+        instance.query_current_stock.return_value = []
+        instance.query_recent_sale_delivery_sales.return_value = pd.DataFrame([
+            {"存货编码": "SKU001", "存货": "", "尺码": "M", "近7天销量": 2, "日均销量": 2 / 7},
+            {"存货编码": "SKU001", "存货": "   ", "尺码": "L", "近7天销量": 2, "日均销量": 2 / 7},
+            {"存货编码": "SKU001", "存货": float("nan"), "尺码": "XL", "近7天销量": 2, "日均销量": 2 / 7},
+        ])
+        mock_90d.return_value = pd.DataFrame([
+            {"存货编码": "SKU001", "尺码": size, "近90天销量": 2}
+            for size in ("M", "L", "XL")
+        ])
+
+        result = build_standard_data_from_tplus_openapi()
+
+        sku_rows = result[result["存货编码"] == "SKU001"]
+        self.assertEqual(len(sku_rows), 3)
+        self.assertEqual(set(sku_rows["存货"]), {"商品A"})
+        self.assertTrue((sku_rows["当前可用量"] == 0).all())
+
+    @patch("app.data_sources.tplus_openapi_source.query_90day_sales")
+    @patch("app.data_sources.tplus_openapi_source.TPlusOpenAPIClient")
     def test_stock_item_with_data(self, MockClient, mock_90d):
         """库存表中有数据的存货应正确合并库存数量。"""
         self._setup_mock(MockClient, mock_90d)
